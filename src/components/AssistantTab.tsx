@@ -96,6 +96,20 @@ export const AssistantTab: React.FC = () => {
   const [speakingAudio, setSpeakingAudio] = useState(false);
   const [autoSpeakReplies, setAutoSpeakReplies] = useState(true);
   const [lastFollowUps, setLastFollowUps] = useState<string[]>([]);
+  const [ephemeralTurn, setEphemeralTurn] = useState<{
+    question: string;
+    replyText: string;
+    citations: Array<{
+      type: string;
+      title: string;
+      source: string;
+      verifiedStatus: string;
+      lastVerifiedDate?: string;
+    }>;
+    confidenceNote: string;
+    escalated: boolean;
+    transcribedFromVoice: boolean;
+  } | null>(null);
 
   // Vocabulary editor state
   const [newVocabTerm, setNewVocabTerm] = useState('');
@@ -120,11 +134,13 @@ export const AssistantTab: React.FC = () => {
 
   const farmers = data?.farmers || [];
   const activeFarmer = farmers.find((f) => f.id === selectedFarmerId) || farmers[0];
+  const demoFarmerOptions = data?.demoPersonas?.farmers || farmers;
 
   useEffect(() => {
     if (activeFarmer) {
       setDialectOverride(activeFarmer.dialectProfile || 'kakinada_coastal');
       setResponseLang(activeFarmer.preferredLanguage === 'en' ? 'en' : 'te');
+      setEphemeralTurn(null);
     }
   }, [activeFarmer?.id]);
 
@@ -206,17 +222,28 @@ export const AssistantTab: React.FC = () => {
     try {
       const response = await apiFetch<{
         conversationId: number;
+        persisted?: boolean;
         turn: {
           replyText: string;
           followUpQuestions: string[];
           shouldEscalate: boolean;
+          citations?: Array<{
+            type: string;
+            title: string;
+            source: string;
+            verifiedStatus: string;
+            lastVerifiedDate?: string;
+          }>;
+          confidenceNote?: string;
         };
         state: BootstrapData;
       }>('/api/ai/chat', {
         method: 'POST',
         body: JSON.stringify({
           farmerId: activeFarmer.id,
-          conversationId: currentConversation?.id || null,
+          conversationId: activeFarmer.consent?.saveConversationHistory
+            ? currentConversation?.id || null
+            : null,
           question: questionText.trim(),
           responseLanguage: responseLang,
           transcribedFromVoice: fromVoice,
@@ -225,13 +252,26 @@ export const AssistantTab: React.FC = () => {
       });
 
       updateBootstrapState(response.state);
-      setActiveConversationId(response.conversationId);
+      if (response.persisted !== false && response.conversationId > 0) {
+        setEphemeralTurn(null);
+        setActiveConversationId(response.conversationId);
+      } else {
+        setActiveConversationId(null);
+        setEphemeralTurn({
+          question: questionText.trim(),
+          replyText: response.turn.replyText,
+          citations: response.turn.citations || [],
+          confidenceNote: response.turn.confidenceNote || '',
+          escalated: Boolean(response.turn.shouldEscalate),
+          transcribedFromVoice: fromVoice,
+        });
+      }
       setLastFollowUps(response.turn.followUpQuestions || []);
       setTextInput('');
       setLiveTranscript('');
       setCallStatusText(
         response.turn.shouldEscalate
-          ? 'Response Ready · Escalated to Agricultural Expert'
+          ? 'Response Ready · Safety Escalation Triggered'
           : 'Response Ready'
       );
 
@@ -243,6 +283,21 @@ export const AssistantTab: React.FC = () => {
       pushToast('error', err.message || 'Failed to generate agricultural response.');
     } finally {
       setSendingChat(false);
+    }
+  };
+
+  const handleDeleteCurrentConversation = async () => {
+    if (!currentConversation) return;
+    try {
+      const nextState = await apiFetch<BootstrapData>(
+        `/api/conversations/${currentConversation.id}`,
+        { method: 'DELETE' }
+      );
+      updateBootstrapState(nextState);
+      setActiveConversationId(null);
+      pushToast('success', 'Deleted saved conversation thread.');
+    } catch (err: any) {
+      pushToast('error', err.message || 'Failed to delete conversation.');
     }
   };
 
@@ -558,33 +613,39 @@ export const AssistantTab: React.FC = () => {
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-4 border-b border-[#E8ECE6]">
           <div>
             <p className="text-xs text-[#4B5E52]">
-              Demonstration Farmer Profiles · Fictional Pilot Records · Editable
+              {activeFarmer.isDemo
+                ? 'Demonstration Farmer Profiles · Fictional Pilot Records · Editable'
+                : 'Authenticated Farmer Profile · Consent-Protected Personal Record'}
             </p>
             <h2 className="text-lg font-semibold text-[#14241B] mt-0.5">
-              Select Farmer Profile for Personalized Guidance
+              {activeFarmer.isDemo
+                ? 'Select Farmer Profile for Personalized Guidance'
+                : `Farmer Profile — ${activeFarmer.name}`}
             </h2>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1 p-1 bg-[#F1F4EF] rounded-lg">
-              {farmers.map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedFarmerId(f.id);
-                    setActiveConversationId(null);
-                  }}
-                  className={`px-3.5 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
-                    f.id === activeFarmer.id
-                      ? 'bg-[#1B4332] text-white'
-                      : 'text-[#374B3E] hover:text-[#14241B]'
-                  }`}
-                >
-                  {f.name} · {f.region} (Demo)
-                </button>
-              ))}
-            </div>
+            {activeFarmer.isDemo && (
+              <div className="flex items-center gap-1 p-1 bg-[#F1F4EF] rounded-lg">
+                {demoFarmerOptions.map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedFarmerId(f.id);
+                      setActiveConversationId(null);
+                    }}
+                    className={`px-3.5 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                      f.id === activeFarmer.id
+                        ? 'bg-[#1B4332] text-white'
+                        : 'text-[#374B3E] hover:text-[#14241B]'
+                    }`}
+                  >
+                    {f.name} · {f.region} (Demo)
+                  </button>
+                ))}
+              </div>
+            )}
 
             <button
               type="button"
@@ -592,7 +653,7 @@ export const AssistantTab: React.FC = () => {
               className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium border border-[#CFD8CE] text-[#14241B] rounded-lg hover:bg-[#F3F5F1] transition-colors whitespace-nowrap shrink-0"
             >
               <UserCog className="w-4 h-4 text-[#1B4332]" />
-              <span>Edit Profile</span>
+              <span>Edit Profile & Consent</span>
             </button>
           </div>
         </div>
@@ -932,10 +993,17 @@ export const AssistantTab: React.FC = () => {
             <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-[#E8ECE6]">
               <div>
                 <p className="text-xs text-[#4B5E52]">
-                  Conversation History · {farmerConversations.length} Thread(s)
+                  Conversation History · {farmerConversations.length} Saved Thread(s) ·{' '}
+                  {activeFarmer.consent?.saveConversationHistory
+                    ? 'History Saving Enabled'
+                    : 'Ephemeral Mode (History Not Stored)'}
                 </p>
                 <h3 className="text-base font-semibold text-[#14241B]">
-                  {currentConversation ? currentConversation.title : 'Start a New Agricultural Conversation'}
+                  {ephemeralTurn
+                    ? 'Ephemeral Agricultural Session (Not Stored)'
+                    : currentConversation
+                      ? currentConversation.title
+                      : 'Start a New Agricultural Conversation'}
                 </h3>
               </div>
 
@@ -943,9 +1011,10 @@ export const AssistantTab: React.FC = () => {
                 {farmerConversations.length > 0 && (
                   <select
                     value={currentConversation?.id || ''}
-                    onChange={(e) =>
-                      setActiveConversationId(e.target.value ? Number(e.target.value) : null)
-                    }
+                    onChange={(e) => {
+                      setEphemeralTurn(null);
+                      setActiveConversationId(e.target.value ? Number(e.target.value) : null);
+                    }}
                     className="px-2.5 py-1.5 text-xs border border-[#D4DCD2] rounded-lg bg-white max-w-[210px] truncate"
                   >
                     {farmerConversations.map((c) => (
@@ -955,9 +1024,23 @@ export const AssistantTab: React.FC = () => {
                     ))}
                   </select>
                 )}
+                {currentConversation && !ephemeralTurn && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteCurrentConversation}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium border border-[#FECACA] text-[#B91C1C] rounded-lg hover:bg-[#FEF2F2] whitespace-nowrap shrink-0"
+                    title="Delete this saved conversation"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete</span>
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => setActiveConversationId(null)}
+                  onClick={() => {
+                    setEphemeralTurn(null);
+                    setActiveConversationId(null);
+                  }}
                   className="px-3 py-1.5 text-xs font-medium border border-[#CFD8CE] text-[#14241B] rounded-lg hover:bg-[#F3F5F1] whitespace-nowrap shrink-0"
                 >
                   New Chat
@@ -967,13 +1050,65 @@ export const AssistantTab: React.FC = () => {
 
             {/* Messages Stream */}
             <div className="flex-1 py-4 space-y-4 overflow-y-auto max-h-[420px]">
-              {!currentConversation || currentConversation.messages.length === 0 ? (
+              {ephemeralTurn ? (
+                <>
+                  <div className="flex flex-col items-end">
+                    <div className="max-w-[88%] rounded-xl px-4 py-3 text-sm bg-[#1B4332] text-white">
+                      <div className="mb-1 text-[11px] opacity-80">
+                        {activeFarmer.name}
+                        {ephemeralTurn.transcribedFromVoice ? ' · Voice Call' : ''} · Ephemeral
+                      </div>
+                      <p className="whitespace-pre-line leading-relaxed">{ephemeralTurn.question}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-start">
+                    <div className="max-w-[88%] rounded-xl px-4 py-3 text-sm bg-[#F4F7F3] text-[#14241B]">
+                      <div className="flex items-center justify-between gap-4 mb-1 text-[11px] opacity-80">
+                        <span>AGRISETU Advisor · Not Stored in Database</span>
+                        <button
+                          type="button"
+                          onClick={() => speakResponseText(ephemeralTurn.replyText, responseLang)}
+                          className="inline-flex items-center gap-1 font-medium text-[#1B4332] hover:underline"
+                        >
+                          <Volume2 className="w-3.5 h-3.5" />
+                          <span>Listen</span>
+                        </button>
+                      </div>
+                      <p className="whitespace-pre-line leading-relaxed">{ephemeralTurn.replyText}</p>
+                      {ephemeralTurn.escalated && (
+                        <div className="mt-2.5 pt-2 border-t border-[#D8E0D5] flex items-start gap-2 text-xs text-[#B45309]">
+                          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                          <span>
+                            High-risk or dosage-specific query detected — consult a certified agricultural officer before field action.
+                          </span>
+                        </div>
+                      )}
+                      {ephemeralTurn.citations.length > 0 && (
+                        <div className="mt-2.5 pt-2 border-t border-[#DDE4DA] space-y-1 text-xs text-[#4B5E52]">
+                          <p className="font-medium text-[#14241B]">Sources & Provenance:</p>
+                          {ephemeralTurn.citations.map((cit, idx) => (
+                            <p key={idx}>
+                              {cit.title} · {cit.source}
+                              {cit.lastVerifiedDate ? ` (Verified ${cit.lastVerifiedDate})` : ''}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                      {ephemeralTurn.confidenceNote && (
+                        <p className="mt-2 text-[11px] text-[#5A6D60]">
+                          {ephemeralTurn.confidenceNote}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              ) : !currentConversation || currentConversation.messages.length === 0 ? (
                 <div className="py-12 text-center space-y-2">
                   <p className="text-sm font-medium text-[#14241B]">
                     నమస్కారం {activeFarmer.name} గారు — Ask any agricultural question by voice or text.
                   </p>
                   <p className="text-xs text-[#4B5E52] max-w-md mx-auto">
-                    AGRISETU uses your consented soil, irrigation, and crop profile along with verified agricultural guidelines and government scheme records.
+                    AGRISETU uses your consented soil, irrigation, and crop profile along with verified agricultural guidelines and government scheme records. Raw audio is never stored.
                   </p>
                 </div>
               ) : (
@@ -983,6 +1118,7 @@ export const AssistantTab: React.FC = () => {
                     title: string;
                     source: string;
                     verifiedStatus: string;
+                    lastVerifiedDate?: string;
                   }> = [];
                   try {
                     citations = JSON.parse(msg.citationsJson || '[]');
@@ -1044,6 +1180,7 @@ export const AssistantTab: React.FC = () => {
                             {citations.map((cit, idx) => (
                               <p key={idx}>
                                 {cit.title} · {cit.source}
+                                {cit.lastVerifiedDate ? ` (Verified ${cit.lastVerifiedDate})` : ''}
                               </p>
                             ))}
                           </div>
@@ -1151,6 +1288,11 @@ export const AssistantTab: React.FC = () => {
           ) : (
             <>
               <div className="bg-[#F6F8F5] rounded-lg p-4 space-y-2 text-xs text-[#374B3E]">
+                {suitabilityResult.evaluationMethod && (
+                  <p className="font-semibold text-[#1B4332]">
+                    Evaluation Method: {suitabilityResult.evaluationMethod}
+                  </p>
+                )}
                 <p className="font-medium text-[#14241B]">
                   Evaluated Profile Inputs: {suitabilityResult.evaluatedInputsSummary}
                 </p>
@@ -1175,7 +1317,9 @@ export const AssistantTab: React.FC = () => {
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-xs text-[#4B5E52]">
-                            Option 0{idx + 1} · {opt.suitabilityBand} · Demo Rule Evaluation
+                            Option 0{idx + 1} · {opt.suitabilityBand} ·{' '}
+                            {opt.recommendationStage ||
+                              'Preliminary Rule-Based Shortlist — Not Expert-Validated'}
                           </p>
                           <h4 className="text-base font-semibold text-[#14241B] mt-0.5">
                             {opt.cropNameTe}
@@ -1193,6 +1337,17 @@ export const AssistantTab: React.FC = () => {
                       </div>
 
                       <p className="text-sm text-[#14241B]">{opt.whySuitable}</p>
+
+                      {opt.keyFactors && opt.keyFactors.length > 0 && (
+                        <div className="bg-[#F6F8F5] rounded-lg p-2.5 space-y-1 text-xs text-[#374B3E]">
+                          <p className="font-semibold text-[#14241B]">
+                            Key Factors Influencing This Rule Score:
+                          </p>
+                          {opt.keyFactors.map((kf, kIdx) => (
+                            <p key={kIdx}>• {kf}</p>
+                          ))}
+                        </div>
+                      )}
 
                       <div className="pt-2 border-t border-[#EEF1EC] space-y-1.5 text-xs text-[#4B5E52]">
                         <p>
@@ -1303,6 +1458,12 @@ export const AssistantTab: React.FC = () => {
                       <p>
                         <strong className="text-[#14241B]">Official Source:</strong>{' '}
                         {scheme.officialSource}
+                        {(scheme.officialSourceUrl || scheme.officialPortal) && (
+                          <span className="text-[#5A6D60]">
+                            {' '}
+                            ({scheme.officialSourceUrl || scheme.officialPortal})
+                          </span>
+                        )}
                       </p>
                     </div>
                   </div>
@@ -1502,17 +1663,22 @@ export const AssistantTab: React.FC = () => {
               <p>
                 <strong className="text-[#14241B]">Official Source:</strong>{' '}
                 {selectedScheme.officialSource}
+                {selectedScheme.officialSourceUrl && (
+                  <span> ({selectedScheme.officialSourceUrl})</span>
+                )}
               </p>
             </div>
 
             <div className="pt-4 border-t border-[#E8ECE6] flex flex-wrap items-center justify-between gap-3">
               <a
-                href={selectedScheme.officialPortal}
+                href={selectedScheme.officialSourceUrl || selectedScheme.officialPortal}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 text-xs font-medium text-[#1B4332] hover:underline"
               >
-                <span>Open Official Portal ({selectedScheme.officialPortal})</span>
+                <span>
+                  Open Official Source ({selectedScheme.officialSourceUrl || selectedScheme.officialPortal})
+                </span>
                 <ExternalLink className="w-3.5 h-3.5" />
               </a>
 

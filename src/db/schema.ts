@@ -6,6 +6,7 @@ import {
   serial,
   text,
   timestamp,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 // 1. users
@@ -47,10 +48,11 @@ export const farmerConsent = pgTable('farmer_consent', {
     .references(() => farmerProfiles.id)
     .notNull()
     .unique(),
-  shareProfileWithAi: boolean('share_profile_with_ai').notNull().default(true),
-  shareProfileWithMerchants: boolean('share_profile_with_merchants').notNull().default(true),
+  shareProfileWithAi: boolean('share_profile_with_ai').notNull().default(false),
+  shareProfileWithMerchants: boolean('share_profile_with_merchants').notNull().default(false),
   shareContactOnEnquiry: boolean('share_contact_on_enquiry').notNull().default(false),
-  shareConversationWithExperts: boolean('share_conversation_with_experts').notNull().default(true),
+  shareConversationWithExperts: boolean('share_conversation_with_experts').notNull().default(false),
+  saveConversationHistory: boolean('save_conversation_history').notNull().default(false),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
@@ -174,6 +176,7 @@ export const schemeRecords = pgTable('scheme_records', {
   relevantOffice: text('relevant_office').notNull(),
   importantDates: text('important_dates').notNull(),
   officialSource: text('official_source').notNull(),
+  officialSourceUrl: text('official_source_url'),
   verificationStatus: text('verification_status').notNull(), // 'Verified' | 'Requires Verification'
   lastVerifiedDate: text('last_verified_date').notNull(),
   isOutdated: boolean('is_outdated').notNull().default(false),
@@ -290,29 +293,33 @@ export const farmerOffers = pgTable('farmer_offers', {
 });
 
 // 16. orders
-export const orders = pgTable('orders', {
-  id: serial('id').primaryKey(),
-  orderCode: text('order_code').notNull().unique(),
-  farmerId: integer('farmer_id')
-    .references(() => farmerProfiles.id)
-    .notNull(),
-  merchantId: integer('merchant_id')
-    .references(() => merchantProfiles.id)
-    .notNull(),
-  sourceType: text('source_type').notNull(), // 'enquiry' | 'offer' | 'agriroute'
-  sourceId: integer('source_id'),
-  cropName: text('crop_name').notNull(),
-  agreedQuantityQuintals: text('agreed_quantity_quintals').notNull(),
-  agreedPricePerQuintal: text('agreed_price_per_quintal').notNull(),
-  deliveryMode: text('delivery_mode').notNull(),
-  scheduledDate: text('scheduled_date').notNull(),
-  orderStatus: text('order_status').notNull().default('Confirmed order'), // 'Confirmed order' | 'Completed' | 'Cancelled'
-  notes: text('notes'),
-  farmerFeedback: text('farmer_feedback'),
-  isDemo: boolean('is_demo').notNull().default(false),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
-});
+export const orders = pgTable(
+  'orders',
+  {
+    id: serial('id').primaryKey(),
+    orderCode: text('order_code').notNull().unique(),
+    farmerId: integer('farmer_id')
+      .references(() => farmerProfiles.id)
+      .notNull(),
+    merchantId: integer('merchant_id')
+      .references(() => merchantProfiles.id)
+      .notNull(),
+    sourceType: text('source_type').notNull(), // 'enquiry' | 'offer' | 'agriroute'
+    sourceId: integer('source_id'),
+    cropName: text('crop_name').notNull(),
+    agreedQuantityQuintals: text('agreed_quantity_quintals').notNull(),
+    agreedPricePerQuintal: text('agreed_price_per_quintal').notNull(),
+    deliveryMode: text('delivery_mode').notNull(),
+    scheduledDate: text('scheduled_date').notNull(),
+    orderStatus: text('order_status').notNull().default('Confirmed order'), // 'Confirmed order' | 'Completed' | 'Cancelled'
+    notes: text('notes'),
+    farmerFeedback: text('farmer_feedback'),
+    isDemo: boolean('is_demo').notNull().default(false),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (table) => [uniqueIndex('orders_source_unique_idx').on(table.sourceType, table.sourceId)]
+);
 
 // 17. supplier_profiles
 export const supplierProfiles = pgTable('supplier_profiles', {

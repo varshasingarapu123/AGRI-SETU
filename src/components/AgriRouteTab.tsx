@@ -17,6 +17,7 @@ export const AgriRouteTab: React.FC = () => {
 
   const farmers = data?.farmers || [];
   const activeFarmer = farmers.find((f) => f.id === selectedFarmerId) || farmers[0];
+  const demoFarmerOptions = data?.demoPersonas?.farmers || farmers;
   const farmerListings = (data?.listings || []).filter(
     (l) => l.farmerId === activeFarmer?.id
   );
@@ -26,6 +27,8 @@ export const AgriRouteTab: React.FC = () => {
 
   const [selectedHarvestId, setSelectedHarvestId] = useState<number | null>(null);
   const [evaluating, setEvaluating] = useState(false);
+  const [routeWarnings, setRouteWarnings] = useState<string[]>([]);
+  const [methodologyBanner, setMethodologyBanner] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     cropName: activeFarmer?.currentCrop || 'Paddy (MTU-1061 Indra)',
@@ -96,18 +99,22 @@ export const AgriRouteTab: React.FC = () => {
     if (!activeFarmer) return;
     setEvaluating(true);
     try {
-      const res = await apiFetch<{ harvestId: number; state: BootstrapData }>(
-        '/api/agriroute/evaluate',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            farmerId: activeFarmer.id,
-            ...form,
-          }),
-        }
-      );
+      const res = await apiFetch<{
+        harvestId: number;
+        missingInformation?: string[];
+        methodologyNote?: string;
+        state: BootstrapData;
+      }>('/api/agriroute/evaluate', {
+        method: 'POST',
+        body: JSON.stringify({
+          farmerId: activeFarmer.id,
+          ...form,
+        }),
+      });
       updateBootstrapState(res.state);
       setSelectedHarvestId(res.harvestId);
+      setRouteWarnings(res.missingInformation || []);
+      setMethodologyBanner(res.methodologyNote || null);
       pushToast(
         'success',
         'Evaluated harvest destinations across wholesale, retail, direct, and processing channels.'
@@ -155,20 +162,23 @@ export const AgriRouteTab: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={activeFarmer?.id || 1}
-            onChange={(e) => {
-              setSelectedFarmerId(Number(e.target.value));
-              setSelectedHarvestId(null);
-            }}
-            className="px-3 py-2 text-sm border border-[#D4DCD2] rounded-lg bg-white"
-          >
-            {farmers.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name} · {f.region} (Demo)
-              </option>
-            ))}
-          </select>
+          {activeFarmer?.isDemo && (
+            <select
+              value={activeFarmer?.id || 1}
+              onChange={(e) => {
+                setSelectedFarmerId(Number(e.target.value));
+                setSelectedHarvestId(null);
+                setRouteWarnings([]);
+              }}
+              className="px-3 py-2 text-sm border border-[#D4DCD2] rounded-lg bg-white"
+            >
+              {demoFarmerOptions.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name} · {f.region} (Demo)
+                </option>
+              ))}
+            </select>
+          )}
 
           <button
             type="button"
@@ -339,15 +349,32 @@ export const AgriRouteTab: React.FC = () => {
 
         {/* Section B & C: Ranked Destination Recommendations & Methodology */}
         <div className="lg:col-span-7 space-y-5">
-          {/* Methodology Transparency Card */}
-          <div className="bg-white border border-[#E3E7E1] rounded-xl p-5 space-y-2">
+          {/* Methodology & Transaction Stage Transparency Card */}
+          <div className="bg-white border border-[#E3E7E1] rounded-xl p-5 space-y-2.5">
             <div className="flex items-center gap-2 text-sm font-semibold text-[#14241B]">
               <Info className="w-4 h-4 text-[#1B4332]" />
-              <span>How AGRIROUTE Ranks Destinations (100-Point Transparent Rubric)</span>
+              <span>How AGRIROUTE Ranks Destinations (100-Point Rule-Based Rubric)</span>
             </div>
             <p className="text-xs text-[#4B5E52]">
-              Volume Absorption Capacity (30 pts) · Quality & Cosmetic Grade Acceptance (25 pts) · Shelf-Life vs Transit Distance Safety (20 pts) · Procurement Window Alignment (15 pts) · Illustrative Transport Cost Efficiency (10 pts). Transport figures and indicative buyer ranges are Pilot Demo Estimates — confirm buyer slot before loading.
+              Volume Absorption Capacity (30 pts) · Quality & Cosmetic Grade Acceptance (25 pts) · Shelf-Life vs Transit Distance Safety (20 pts) · Procurement Window Alignment (15 pts) · Illustrative Transport Cost Efficiency (10 pts).
             </p>
+            <p className="text-xs text-[#374B3E] bg-[#F6F8F5] p-2.5 rounded-lg">
+              <strong>Stage Distinction:</strong> AGRIROUTE outputs{' '}
+              <em>Suggested Destinations (Demo Estimates)</em> based on{' '}
+              <em>Indicative Buyer Demand</em>. Selecting a route records your preference in My Farm — it is{' '}
+              <strong>not</strong> a Confirmed Buyer Commitment, Transporter Quote, or Completed Transaction until an Enquiry/Offer is mutually accepted into a Confirmed Order.
+            </p>
+            {methodologyBanner && (
+              <p className="text-xs text-[#5A6D60]">{methodologyBanner}</p>
+            )}
+            {routeWarnings.length > 0 && (
+              <div className="pt-2 border-t border-[#E8ECE6] text-xs text-[#B45309] space-y-1">
+                <p className="font-semibold">Missing / Defaulted Input Assumptions:</p>
+                {routeWarnings.map((w, idx) => (
+                  <p key={idx}>• {w}</p>
+                ))}
+              </div>
+            )}
           </div>
 
           {displayedHarvest ? (
@@ -419,10 +446,16 @@ export const AgriRouteTab: React.FC = () => {
                           {rec.quantityAcceptedQuintals}
                         </td>
                         <td className="py-3.5 px-2 text-right font-mono-num text-xs">
-                          {rec.distanceKm} km
+                          ~{rec.distanceKm} km
+                          <span className="block text-[10px] text-[#5A6D60]">Demo Centroid</span>
                         </td>
                         <td className="py-3.5 px-2 font-mono-num text-xs text-[#4B5E52]">
                           {rec.estimatedLogisticsCostInr}
+                          <span className="block text-[10px] text-[#B45309]">
+                            {rec.isIllustrativeEstimate
+                              ? 'Illustrative Formula (Not a Quote)'
+                              : 'Verified Quote'}
+                          </span>
                         </td>
                         <td className="py-3.5 pl-2">
                           {rec.isSelected ? (

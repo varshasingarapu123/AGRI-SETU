@@ -62,6 +62,7 @@ export const FarmerMarketTab: React.FC = () => {
 
   const farmers = data?.farmers || [];
   const activeFarmer = farmers.find((f) => f.id === selectedFarmerId) || farmers[0];
+  const demoFarmerOptions = data?.demoPersonas?.farmers || farmers;
   const isKakinadaFarmer = (activeFarmer?.region || '').toLowerCase().includes('kakinada');
 
   const demands = data?.demands || [];
@@ -201,17 +202,19 @@ export const FarmerMarketTab: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <select
-            value={activeFarmer?.id || 1}
-            onChange={(e) => setSelectedFarmerId(Number(e.target.value))}
-            className="px-3 py-2 text-sm border border-[#D4DCD2] rounded-lg bg-white"
-          >
-            {farmers.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name} · {f.region} (Demo)
-              </option>
-            ))}
-          </select>
+          {activeFarmer?.isDemo && (
+            <select
+              value={activeFarmer?.id || 1}
+              onChange={(e) => setSelectedFarmerId(Number(e.target.value))}
+              className="px-3 py-2 text-sm border border-[#D4DCD2] rounded-lg bg-white"
+            >
+              {demoFarmerOptions.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name} · {f.region} (Demo)
+                </option>
+              ))}
+            </select>
+          )}
 
           <div className="flex items-center gap-1 p-1 bg-[#EFF2ED] rounded-lg">
             <button

@@ -6,6 +6,7 @@ import {
   MessageSquare,
   ShieldCheck,
   BookmarkCheck,
+  Trash2,
 } from 'lucide-react';
 import { useAgriSetu } from '../context/AgriSetuContext.tsx';
 import { FarmerProfileModal } from './FarmerProfileModal.tsx';
@@ -34,10 +35,12 @@ export const MyFarmTab: React.FC = () => {
   const [subSection, setSubSection] = useState<MyFarmSubSection>('listings_enquiries');
   const [showNewListingForm, setShowNewListingForm] = useState(false);
   const [publishingListing, setPublishingListing] = useState(false);
+  const [updatingEnquiryId, setUpdatingEnquiryId] = useState<number | null>(null);
   const [feedbackInputs, setFeedbackInputs] = useState<Record<number, string>>({});
 
   const farmers = data?.farmers || [];
   const activeFarmer = farmers.find((f) => f.id === selectedFarmerId) || farmers[0];
+  const demoFarmerOptions = data?.demoPersonas?.farmers || farmers;
 
   const [listingForm, setListingForm] = useState({
     cropName: activeFarmer?.currentCrop || '',
@@ -115,6 +118,8 @@ export const MyFarmTab: React.FC = () => {
   };
 
   const handleFarmerRespondEnquiry = async (enquiryId: number, status: string) => {
+    if (updatingEnquiryId === enquiryId) return;
+    setUpdatingEnquiryId(enquiryId);
     try {
       const nextState = await apiFetch<BootstrapData>(`/api/enquiries/${enquiryId}/status`, {
         method: 'PATCH',
@@ -124,6 +129,34 @@ export const MyFarmTab: React.FC = () => {
       pushToast('success', `Updated buyer enquiry #${enquiryId} to "${status}".`);
     } catch (err: any) {
       pushToast('error', err.message || 'Failed to update enquiry.');
+    } finally {
+      setUpdatingEnquiryId(null);
+    }
+  };
+
+  const handleDeleteConversation = async (conversationId: number) => {
+    try {
+      const nextState = await apiFetch<BootstrapData>(`/api/conversations/${conversationId}`, {
+        method: 'DELETE',
+      });
+      updateBootstrapState(nextState);
+      pushToast('success', 'Deleted saved conversation.');
+    } catch (err: any) {
+      pushToast('error', err.message || 'Failed to delete conversation.');
+    }
+  };
+
+  const handleClearAllConversations = async () => {
+    try {
+      const nextState = await apiFetch<BootstrapData>(
+        `/api/farmers/${activeFarmer.id}/conversations`,
+        { method: 'DELETE' }
+      );
+      updateBootstrapState(nextState);
+      setActiveConversationId(null);
+      pushToast('success', 'Cleared all saved AI conversation history.');
+    } catch (err: any) {
+      pushToast('error', err.message || 'Failed to clear conversation history.');
     }
   };
 
@@ -159,17 +192,19 @@ export const MyFarmTab: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={activeFarmer.id}
-              onChange={(e) => setSelectedFarmerId(Number(e.target.value))}
-              className="px-3 py-2 text-sm border border-[#D4DCD2] rounded-lg bg-white"
-            >
-              {farmers.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name} · {f.region}
-                </option>
-              ))}
-            </select>
+            {activeFarmer.isDemo && (
+              <select
+                value={activeFarmer.id}
+                onChange={(e) => setSelectedFarmerId(Number(e.target.value))}
+                className="px-3 py-2 text-sm border border-[#D4DCD2] rounded-lg bg-white"
+              >
+                {demoFarmerOptions.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name} · {f.region} (Demo)
+                  </option>
+                ))}
+              </select>
+            )}
 
             <button
               type="button"
@@ -270,6 +305,13 @@ export const MyFarmTab: React.FC = () => {
             Expert Escalation Context:{' '}
             <strong>
               {activeFarmer.consent?.shareConversationWithExperts ? 'Consented' : 'Withheld'}
+            </strong>
+          </span>
+          <span>·</span>
+          <span>
+            AI History Storage:{' '}
+            <strong>
+              {activeFarmer.consent?.saveConversationHistory ? 'Saved' : 'Ephemeral (Not Stored)'}
             </strong>
           </span>
         </div>
@@ -543,36 +585,69 @@ export const MyFarmTab: React.FC = () => {
                       on <span className="font-mono-num">{enq.procurementDate}</span>
                     </p>
                     {enq.message && <p className="text-[#4B5E52]">"{enq.message}"</p>}
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => handleFarmerRespondEnquiry(enq.id, 'Under discussion')}
-                        className="px-2.5 py-1 border border-[#CFD8CE] rounded-md hover:bg-[#F3F5F1]"
-                      >
-                        Discuss
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleFarmerRespondEnquiry(enq.id, 'Accepted')}
-                        className="px-2.5 py-1 border border-[#CFD8CE] rounded-md hover:bg-[#F3F5F1]"
-                      >
-                        Accept Terms
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleFarmerRespondEnquiry(enq.id, 'Confirmed order')}
-                        className="px-2.5 py-1 bg-[#1B4332] text-white rounded-md hover:bg-[#143326]"
-                      >
-                        Confirm Order
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleFarmerRespondEnquiry(enq.id, 'Rejected')}
-                        className="px-2.5 py-1 text-[#B91C1C] hover:underline"
-                      >
-                        Decline
-                      </button>
-                    </div>
+                    {enq.status === 'Confirmed order' ||
+                    enq.status === 'Rejected' ||
+                    enq.status === 'Cancelled' ? (
+                      <p className="text-[#5A6D60] pt-1">
+                        {enq.status === 'Confirmed order'
+                          ? 'Converted into a Confirmed Order — manage delivery & settlement under Confirmed Orders.'
+                          : `Enquiry closed (${enq.status}).`}
+                      </p>
+                    ) : enq.status === 'Accepted' ? (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={updatingEnquiryId === enq.id}
+                          onClick={() => handleFarmerRespondEnquiry(enq.id, 'Confirmed order')}
+                          className="px-2.5 py-1 bg-[#1B4332] text-white rounded-md hover:bg-[#143326] disabled:opacity-50"
+                        >
+                          Confirm Order
+                        </button>
+                        <button
+                          type="button"
+                          disabled={updatingEnquiryId === enq.id}
+                          onClick={() => handleFarmerRespondEnquiry(enq.id, 'Cancelled')}
+                          className="px-2.5 py-1 text-[#B91C1C] hover:underline disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={updatingEnquiryId === enq.id}
+                          onClick={() => handleFarmerRespondEnquiry(enq.id, 'Under discussion')}
+                          className="px-2.5 py-1 border border-[#CFD8CE] rounded-md hover:bg-[#F3F5F1] disabled:opacity-50"
+                        >
+                          Discuss
+                        </button>
+                        <button
+                          type="button"
+                          disabled={updatingEnquiryId === enq.id}
+                          onClick={() => handleFarmerRespondEnquiry(enq.id, 'Accepted')}
+                          className="px-2.5 py-1 border border-[#CFD8CE] rounded-md hover:bg-[#F3F5F1] disabled:opacity-50"
+                        >
+                          Accept Terms
+                        </button>
+                        <button
+                          type="button"
+                          disabled={updatingEnquiryId === enq.id}
+                          onClick={() => handleFarmerRespondEnquiry(enq.id, 'Confirmed order')}
+                          className="px-2.5 py-1 bg-[#1B4332] text-white rounded-md hover:bg-[#143326] disabled:opacity-50"
+                        >
+                          Confirm Order
+                        </button>
+                        <button
+                          type="button"
+                          disabled={updatingEnquiryId === enq.id}
+                          onClick={() => handleFarmerRespondEnquiry(enq.id, 'Rejected')}
+                          className="px-2.5 py-1 text-[#B91C1C] hover:underline disabled:opacity-50"
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -724,11 +799,27 @@ export const MyFarmTab: React.FC = () => {
       {subSection === 'ai_saved' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white border border-[#E3E7E1] rounded-xl p-6 space-y-4">
-            <h3 className="text-base font-semibold text-[#14241B]">
-              My AI Conversation History ({myConversations.length})
-            </h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-base font-semibold text-[#14241B]">
+                My AI Conversation History ({myConversations.length})
+              </h3>
+              {myConversations.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearAllConversations}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-[#B91C1C] hover:underline"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Clear All History</span>
+                </button>
+              )}
+            </div>
             {myConversations.length === 0 ? (
-              <p className="text-sm text-[#4B5E52]">No conversations recorded yet.</p>
+              <p className="text-sm text-[#4B5E52]">
+                {activeFarmer.consent?.saveConversationHistory
+                  ? 'No saved conversations recorded yet.'
+                  : 'Conversation saving is currently turned OFF in your Privacy & Consent settings.'}
+              </p>
             ) : (
               myConversations.map((c) => (
                 <div
@@ -741,17 +832,27 @@ export const MyFarmTab: React.FC = () => {
                       {c.messages.length} messages · Status: {c.status}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveConversationId(c.id);
-                      setActiveTab('assistant');
-                    }}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium border border-[#CFD8CE] rounded-lg hover:bg-[#F3F5F1] whitespace-nowrap shrink-0"
-                  >
-                    <MessageSquare className="w-3.5 h-3.5" />
-                    <span>Open Thread</span>
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveConversationId(c.id);
+                        setActiveTab('assistant');
+                      }}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium border border-[#CFD8CE] rounded-lg hover:bg-[#F3F5F1] whitespace-nowrap"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>Open Thread</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteConversation(c.id)}
+                      className="p-1.5 text-[#5A6D60] hover:text-[#B91C1C]"
+                      aria-label={`Delete conversation ${c.title}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               ))
             )}

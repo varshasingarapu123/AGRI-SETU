@@ -5,14 +5,11 @@ import {
   BookOpen,
   Users,
   Store,
-  UserCog,
   Plus,
 } from 'lucide-react';
 import { useAgriSetu } from '../context/AgriSetuContext.tsx';
-import { FarmerProfileModal } from './FarmerProfileModal.tsx';
 import type {
   BootstrapData,
-  EnrichedFarmerProfile,
   KnowledgeRecord,
   SchemeRecord,
 } from '../types/agrisetu.ts';
@@ -41,7 +38,6 @@ const KNOWLEDGE_CATEGORIES = [
 export const CoordinatorDashboardTab: React.FC = () => {
   const { data, apiFetch, updateBootstrapState, pushToast } = useAgriSetu();
   const [subTab, setSubTab] = useState<CoordSubTab>('overview_analytics');
-  const [editingFarmer, setEditingFarmer] = useState<EnrichedFarmerProfile | null>(null);
 
   // Escalation editor state
   const [escalationEdits, setEscalationEdits] = useState<
@@ -82,6 +78,7 @@ export const CoordinatorDashboardTab: React.FC = () => {
     relevantOffice: 'Village Rythu Seva Kendra',
     importantDates: 'Verify seasonal notification',
     officialSource: '',
+    officialSourceUrl: 'https://',
     verificationStatus: 'Requires Verification',
     lastVerifiedDate: '2026-10-31',
     isOutdated: false,
@@ -226,6 +223,7 @@ export const CoordinatorDashboardTab: React.FC = () => {
         relevantOffice: 'Village Rythu Seva Kendra',
         importantDates: 'Verify seasonal notification',
         officialSource: '',
+        officialSourceUrl: 'https://',
         verificationStatus: 'Requires Verification',
         lastVerifiedDate: '2026-10-31',
         isOutdated: false,
@@ -252,6 +250,7 @@ export const CoordinatorDashboardTab: React.FC = () => {
       relevantOffice: s.relevantOffice,
       importantDates: s.importantDates,
       officialSource: s.officialSource,
+      officialSourceUrl: s.officialSourceUrl || s.officialPortal || 'https://',
       verificationStatus: s.verificationStatus,
       lastVerifiedDate: s.lastVerifiedDate,
       isOutdated: s.isOutdated,
@@ -653,15 +652,8 @@ export const CoordinatorDashboardTab: React.FC = () => {
                         <td className="py-3 px-3 text-right font-mono-num text-xs">
                           {fListings} / {fEnquiries}
                         </td>
-                        <td className="py-3 pl-3">
-                          <button
-                            type="button"
-                            onClick={() => setEditingFarmer(f)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium border border-[#CFD8CE] rounded-md hover:bg-[#F3F5F1]"
-                          >
-                            <UserCog className="w-3.5 h-3.5" />
-                            <span>Edit Record</span>
-                          </button>
+                        <td className="py-3 pl-3 text-xs text-[#5A6D60]">
+                          Farmer-Controlled Consent
                         </td>
                       </tr>
                     );
@@ -991,17 +983,33 @@ export const CoordinatorDashboardTab: React.FC = () => {
                 </div>
               </div>
 
-              <div>
-                <label className="block font-medium text-[#4B5E52] mb-1">Official Source</label>
-                <input
-                  type="text"
-                  required
-                  value={schemeForm.officialSource}
-                  onChange={(e) =>
-                    setSchemeForm({ ...schemeForm, officialSource: e.target.value })
-                  }
-                  className="w-full px-2.5 py-2 border border-[#D4DCD2] rounded-lg"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-medium text-[#4B5E52] mb-1">Official Source</label>
+                  <input
+                    type="text"
+                    required
+                    value={schemeForm.officialSource}
+                    onChange={(e) =>
+                      setSchemeForm({ ...schemeForm, officialSource: e.target.value })
+                    }
+                    className="w-full px-2.5 py-2 border border-[#D4DCD2] rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-[#4B5E52] mb-1">
+                    Official Source URL
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={schemeForm.officialSourceUrl}
+                    onChange={(e) =>
+                      setSchemeForm({ ...schemeForm, officialSourceUrl: e.target.value })
+                    }
+                    className="w-full px-2.5 py-2 border border-[#D4DCD2] rounded-lg"
+                  />
+                </div>
               </div>
 
               <label className="flex items-center gap-2 cursor-pointer">
@@ -1048,14 +1056,6 @@ export const CoordinatorDashboardTab: React.FC = () => {
             </div>
           </div>
         </div>
-      )}
-
-      {editingFarmer && (
-        <FarmerProfileModal
-          farmer={editingFarmer}
-          isOpen={Boolean(editingFarmer)}
-          onClose={() => setEditingFarmer(null)}
-        />
       )}
     </div>
   );

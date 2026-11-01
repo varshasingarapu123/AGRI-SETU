@@ -79,7 +79,7 @@ const AgriSetuWorkspace: React.FC = () => {
 
   const t = UI_LABELS[uiLang];
 
-  const navItems: Array<{
+  const allNavItems: Array<{
     id: MainTabId;
     label: string;
     icon: React.FC<{ className?: string }>;
@@ -91,6 +91,21 @@ const AgriSetuWorkspace: React.FC = () => {
     { id: 'my_farm', label: t.navMyFarm, icon: Tractor },
     { id: 'coordinator', label: t.navCoordinator, icon: ShieldAlert },
   ];
+
+  const isLiveAuthenticatedActor = Boolean(data?.currentActor && !data.currentActor.isDemo);
+  const navItems = isLiveAuthenticatedActor
+    ? allNavItems.filter((item) => {
+        const verifiedRole = data?.currentActor?.role;
+        if (verifiedRole === 'coordinator') return item.id === 'coordinator';
+        if (verifiedRole === 'merchant') return item.id === 'merchant_market';
+        return (
+          item.id === 'assistant' ||
+          item.id === 'farmer_market' ||
+          item.id === 'agriroute' ||
+          item.id === 'my_farm'
+        );
+      })
+    : allNavItems;
 
   // Filter notifications relevant to current role/actor
   const roleNotifications = (data?.notifications || []).filter((n) => {

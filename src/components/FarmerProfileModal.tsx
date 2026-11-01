@@ -17,64 +17,41 @@ export const FarmerProfileModal: React.FC<FarmerProfileModalProps> = ({
   const { apiFetch, updateBootstrapState, pushToast } = useAgriSetu();
   const [saving, setSaving] = useState(false);
 
-  const [form, setForm] = useState({
-    name: farmer.name,
-    nameTe: farmer.nameTe || '',
-    village: farmer.village,
-    mandal: farmer.mandal,
-    district: farmer.district,
-    region: farmer.region,
-    preferredLanguage: farmer.preferredLanguage || 'te',
-    dialectProfile: farmer.dialectProfile || 'kakinada_coastal',
-    farmAreaAcres: farmer.farmDetails?.farmAreaAcres || '3.0',
-    irrigationType: farmer.farmDetails?.irrigationType || 'Canal',
-    waterAvailability: farmer.farmDetails?.waterAvailability || 'Seasonal canal water',
-    climateZone: farmer.farmDetails?.climateZone || 'Coastal Delta',
-    storageAvailable: Boolean(farmer.farmDetails?.storageAvailable),
-    storageDetails: farmer.farmDetails?.storageDetails || '',
-    cropInterests: farmer.farmDetails?.cropInterests || '',
-    constraints: farmer.farmDetails?.constraints || '',
-    soilType: farmer.latestSoil?.soilType || 'Alluvial Clay Loam',
-    phLevel: farmer.latestSoil?.phLevel || '',
-    organicCarbon: farmer.latestSoil?.organicCarbon || '',
-    salinityNote: farmer.latestSoil?.salinityNote || '',
-    currentCrop: farmer.currentCrop || '',
-    previousCrop: farmer.previousCrop || '',
-    shareProfileWithAi: farmer.consent?.shareProfileWithAi ?? true,
-    shareProfileWithMerchants: farmer.consent?.shareProfileWithMerchants ?? true,
-    shareContactOnEnquiry: farmer.consent?.shareContactOnEnquiry ?? false,
-    shareConversationWithExperts: farmer.consent?.shareConversationWithExperts ?? true,
+  const buildFormFromFarmer = (f: EnrichedFarmerProfile) => ({
+    name: f.name,
+    nameTe: f.nameTe || '',
+    village: f.village,
+    mandal: f.mandal,
+    district: f.district,
+    region: f.region,
+    preferredLanguage: f.preferredLanguage || 'te',
+    dialectProfile: f.dialectProfile || 'kakinada_coastal',
+    farmAreaAcres: f.farmDetails?.farmAreaAcres || '2.0',
+    irrigationType: f.farmDetails?.irrigationType || 'Canal',
+    waterAvailability: f.farmDetails?.waterAvailability || 'Seasonal canal water',
+    climateZone: f.farmDetails?.climateZone || 'Coastal Delta',
+    storageAvailable: Boolean(f.farmDetails?.storageAvailable),
+    storageDetails: f.farmDetails?.storageDetails || '',
+    cropInterests: f.farmDetails?.cropInterests || '',
+    constraints: f.farmDetails?.constraints || '',
+    soilType: f.latestSoil?.soilType || 'Alluvial Clay Loam',
+    phLevel: f.latestSoil?.phLevel || '',
+    organicCarbon: f.latestSoil?.organicCarbon || '',
+    salinityNote: f.latestSoil?.salinityNote || '',
+    currentCrop: f.currentCrop || '',
+    previousCrop: f.previousCrop || '',
+    // Missing consent ALWAYS defaults to false (never true)
+    shareProfileWithAi: f.consent?.shareProfileWithAi === true,
+    shareProfileWithMerchants: f.consent?.shareProfileWithMerchants === true,
+    shareContactOnEnquiry: f.consent?.shareContactOnEnquiry === true,
+    shareConversationWithExperts: f.consent?.shareConversationWithExperts === true,
+    saveConversationHistory: f.consent?.saveConversationHistory === true,
   });
 
+  const [form, setForm] = useState(() => buildFormFromFarmer(farmer));
+
   useEffect(() => {
-    setForm({
-      name: farmer.name,
-      nameTe: farmer.nameTe || '',
-      village: farmer.village,
-      mandal: farmer.mandal,
-      district: farmer.district,
-      region: farmer.region,
-      preferredLanguage: farmer.preferredLanguage || 'te',
-      dialectProfile: farmer.dialectProfile || 'kakinada_coastal',
-      farmAreaAcres: farmer.farmDetails?.farmAreaAcres || '3.0',
-      irrigationType: farmer.farmDetails?.irrigationType || 'Canal',
-      waterAvailability: farmer.farmDetails?.waterAvailability || 'Seasonal canal water',
-      climateZone: farmer.farmDetails?.climateZone || 'Coastal Delta',
-      storageAvailable: Boolean(farmer.farmDetails?.storageAvailable),
-      storageDetails: farmer.farmDetails?.storageDetails || '',
-      cropInterests: farmer.farmDetails?.cropInterests || '',
-      constraints: farmer.farmDetails?.constraints || '',
-      soilType: farmer.latestSoil?.soilType || 'Alluvial Clay Loam',
-      phLevel: farmer.latestSoil?.phLevel || '',
-      organicCarbon: farmer.latestSoil?.organicCarbon || '',
-      salinityNote: farmer.latestSoil?.salinityNote || '',
-      currentCrop: farmer.currentCrop || '',
-      previousCrop: farmer.previousCrop || '',
-      shareProfileWithAi: farmer.consent?.shareProfileWithAi ?? true,
-      shareProfileWithMerchants: farmer.consent?.shareProfileWithMerchants ?? true,
-      shareContactOnEnquiry: farmer.consent?.shareContactOnEnquiry ?? false,
-      shareConversationWithExperts: farmer.consent?.shareConversationWithExperts ?? true,
-    });
+    setForm(buildFormFromFarmer(farmer));
   }, [farmer, isOpen]);
 
   if (!isOpen) return null;
@@ -88,7 +65,7 @@ export const FarmerProfileModal: React.FC<FarmerProfileModalProps> = ({
         body: JSON.stringify(form),
       });
       updateBootstrapState(nextState);
-      pushToast('success', `Saved profile and consent settings for ${form.name}.`);
+      pushToast('success', `Saved profile and privacy consent settings for ${form.name}.`);
       onClose();
     } catch (err: any) {
       pushToast('error', err.message || 'Failed to update farmer profile.');
@@ -103,7 +80,7 @@ export const FarmerProfileModal: React.FC<FarmerProfileModalProps> = ({
         <div className="flex items-start justify-between gap-4 pb-4 border-b border-[#E8ECE6]">
           <div>
             <p className="text-xs text-[#4B5E52]">
-              {farmer.farmerCode} · Fictional Demo Farmer Record
+              {farmer.farmerCode} · {farmer.isDemo ? 'Fictional Demo Farmer Record' : 'Personal Farmer Account'}
             </p>
             <h2 className="text-xl font-semibold text-[#14241B] mt-0.5">
               Edit Farmer Profile, Soil & Data Consent
@@ -294,10 +271,10 @@ export const FarmerProfileModal: React.FC<FarmerProfileModalProps> = ({
           <div className="pt-4 border-t border-[#E8ECE6] space-y-3">
             <div className="flex items-center gap-2 text-sm font-semibold text-[#14241B]">
               <ShieldCheck className="w-4 h-4 text-[#1B4332]" />
-              <span>Data Sharing & Privacy Consent Controls</span>
+              <span>Data Sharing & Privacy Consent Controls (Default: Off)</span>
             </div>
             <p className="text-xs text-[#4B5E52]">
-              Your farm profile is shared across AGRISETU modules only where you explicitly consent below.
+              All sharing and storage permissions default to off unless explicitly granted below. Raw voice audio is never stored.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
               <label className="flex items-start gap-2.5 cursor-pointer">
@@ -308,7 +285,18 @@ export const FarmerProfileModal: React.FC<FarmerProfileModalProps> = ({
                   className="mt-1 accent-[#1B4332]"
                 />
                 <span>
-                  Allow AI Farmer Assistant to use my soil, location, and crop context
+                  Allow AI Farmer Assistant & STT to use my soil, location, crop, and vocabulary context
+                </span>
+              </label>
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.saveConversationHistory}
+                  onChange={(e) => setForm({ ...form, saveConversationHistory: e.target.checked })}
+                  className="mt-1 accent-[#1B4332]"
+                />
+                <span>
+                  Save my AI conversation transcripts in My Farm history (uncheck for ephemeral chats)
                 </span>
               </label>
               <label className="flex items-start gap-2.5 cursor-pointer">
@@ -320,7 +308,7 @@ export const FarmerProfileModal: React.FC<FarmerProfileModalProps> = ({
                   }
                   className="mt-1 accent-[#1B4332]"
                 />
-                <span>Show my farmer name on Merchant Market produce listings</span>
+                <span>Show my farmer name on Merchant Market produce listings & offers</span>
               </label>
               <label className="flex items-start gap-2.5 cursor-pointer">
                 <input
@@ -331,7 +319,7 @@ export const FarmerProfileModal: React.FC<FarmerProfileModalProps> = ({
                 />
                 <span>Share masked phone details with verified buyer enquiries</span>
               </label>
-              <label className="flex items-start gap-2.5 cursor-pointer">
+              <label className="flex items-start gap-2.5 cursor-pointer sm:col-span-2">
                 <input
                   type="checkbox"
                   checked={form.shareConversationWithExperts}
@@ -340,7 +328,9 @@ export const FarmerProfileModal: React.FC<FarmerProfileModalProps> = ({
                   }
                   className="mt-1 accent-[#1B4332]"
                 />
-                <span>Include conversation context when escalating to Agricultural Experts</span>
+                <span>
+                  Share my question and conversation context with Agricultural Experts when escalating
+                </span>
               </label>
             </div>
           </div>

@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type } from '@google/genai';
+import { evaluateAgriculturalSafety } from './knowledgeRetrieval.ts';
 
 const getAiClient = () => {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -29,7 +30,7 @@ export const getAiRuntimeStatus = () => {
 
 export interface FarmerContextForAi {
   profileShared: boolean;
-  name: string;
+  name?: string;
   village?: string;
   mandal?: string;
   district?: string;
@@ -65,6 +66,8 @@ export interface RetrievedSchemeItem {
   eligibilityConditions: string;
   benefits: string;
   officialPortal: string;
+  officialSource?: string;
+  officialSourceUrl?: string | null;
   verificationStatus: string;
   lastVerifiedDate: string;
 }
@@ -76,11 +79,13 @@ export interface AssistantTurnResponse {
   escalationCategory: string;
   escalationReason: string;
   confidenceNote: string;
+  evidenceBasis: 'verified_knowledge_base' | 'general_ai_explanation' | 'safety_escalation';
   citations: Array<{
     type: 'knowledge' | 'scheme';
     idOrCode: string;
     title: string;
     source: string;
+    lastVerifiedDate: string;
     verifiedStatus: string;
   }>;
   demoFallback: boolean;
@@ -103,79 +108,114 @@ export async function generateAgriculturalGuidance(params: {
 }): Promise<AssistantTurnResponse> {
   const ai = getAiClient();
   const textModel = process.env.AI_TEXT_MODEL || 'gemini-3.8-flash';
+  const isTelugu = params.responseLanguage === 'te';
+
+  // Enforce strict consent boundary: zero personal, location, soil, crop, or custom vocabulary details when profileShared === false
+  const allowProfile = params.farmerContext.profileShared === true;
+  const greetingNameTe =
+    allowProfile && params.farmerContext.name ? `${params.farmerContext.name} గారు` : 'రైతు గారు';
+  const greetingNameEn =
+    allowProfile && params.farmerContext.name ? params.farmerContext.name : 'Farmer';
+
+  const safety = evaluateAgriculturalSafety(params.question);
+  const hasVerifiedMatch = params.knowledgeDocs.length > 0 || params.schemes.length > 0;
 
   const citations = [
     ...params.knowledgeDocs.slice(0, 3).map((k) => ({
       type: 'knowledge' as const,
       idOrCode: String(k.id),
       title: k.title,
-      source: `${k.sourceName} (Verified: ${k.lastVerifiedDate})`,
+      source: `${k.sourceName} (Last verified: ${k.lastVerifiedDate})`,
+      lastVerifiedDate: k.lastVerifiedDate,
       verifiedStatus: k.verificationStatus,
     })),
     ...params.schemes.slice(0, 2).map((s) => ({
       type: 'scheme' as const,
       idOrCode: s.schemeCode,
       title: s.schemeName,
-      source: `${s.officialPortal} (${s.verificationStatus}, ${s.lastVerifiedDate})`,
+      source: `${s.officialSource || s.officialPortal} (Last verified: ${s.lastVerifiedDate})`,
+      lastVerifiedDate: s.lastVerifiedDate,
       verifiedStatus: s.verificationStatus,
     })),
   ];
 
-  // Responsible high-risk keyword detection (chemical dosage, acute toxicity, severe unknown blight)
-  const qLower = params.question.toLowerCase();
-  const highRiskTrigger =
-    qLower.includes('dosage') ||
-    qLower.includes('ml per litre') ||
-    qLower.includes('chemical spray') ||
-    qLower.includes('poison') ||
-    qLower.includes('monocrotophos') ||
-    qLower.includes('పురుగుమందు మోతాదు') ||
-    qLower.includes('కెమికల్ మోతాదు');
-
   if (!ai) {
-    // Transparent Demo RAG Fallback when GEMINI_API_KEY is unconfigured
+    // Transparent Demo RAG Fallback when GEMINI_API_KEY is unconfigured.
+    // Never falls back to a random knowledge document when nothing met the relevance threshold.
     const topDoc = params.knowledgeDocs[0];
     const topScheme = params.schemes[0];
-    const isTelugu = params.responseLanguage === 'te';
 
     let replyText = '';
-    if (highRiskTrigger) {
+    let confidenceNote = '';
+    let evidenceBasis: AssistantTurnResponse['evidenceBasis'] = 'verified_knowledge_base';
+
+    if (safety.isHighRisk) {
+      evidenceBasis = 'safety_escalation';
       replyText = isTelugu
-        ? `నమస్కారం ${params.farmerContext.name} గారు. పురుగుమందుల ఖచ్చితమైన మోతాదు లేదా తీవ్రమైన తెగులు నిర్ధారణ విషయంలో పొరపాటు జరగకూడదు కాబట్టి, నేను అంచనాతో మందుల మోతాదు చెప్పను. మీ ప్రశ్నను వెంటనే వ్యవసాయ నిపుణుల (Agricultural Expert) పరిశీలనకు పంపాను. ఆలోపు పొలంలో నీటి ముంపు లేకుండా చూసి, ప్రభావితమైన మొక్కల ఫోటో లేదా లక్షణాలను రైతు సేవా కేంద్రం అధికారికి చూపించండి.`
-        : `Hello ${params.farmerContext.name}. Because chemical pesticide dosages and acute disease diagnosis carry crop and safety risks, AGRISETU does not guess dosages. Your query has been escalated to an Agricultural Expert. Meanwhile, inspect field drainage and share symptom details with your Mandal Agricultural Officer.`;
-    } else if (topScheme && (qLower.includes('scheme') || qLower.includes('kisan') || qLower.includes('పథకం') || qLower.includes('సబ్సిడీ') || qLower.includes('భీమా'))) {
+        ? `నమస్కారం ${greetingNameTe}. పురుగుమందులు, ఎరువుల ఖచ్చితమైన మోతాదు లేదా తీవ్రమైన పంట తెగులు నిర్ధారణ విషయంలో ఊహాగానాలతో మోతాదు చెప్పడం సురక్షితం కాదు. అందుకే AGRISETU రసాయన మోతాదులను అంచనా వేయదు. దయచేసి వెంటనే మీ మండల వ్యవసాయ అధికారి (MAO) లేదా రైతు సేవా కేంద్రం నిపుణులను సంప్రదించండి.${topDoc ? ` (సంబంధిత ప్రాథమిక సూచన — ${topDoc.sourceName}, ధృవీకరించిన తేదీ ${topDoc.lastVerifiedDate}: ${topDoc.summary})` : ''}`
+        : `Hello ${greetingNameEn}. Because pesticide sprays, chemical/fertilizer dosages, and severe crop-disease interventions carry crop-loss and safety risks, AGRISETU never guesses chemical dosages. Please consult your Mandal Agricultural Officer (MAO) or KVK specialist before applying any chemical.${topDoc ? ` (Related general reference from ${topDoc.sourceName}, last verified ${topDoc.lastVerifiedDate}: ${topDoc.summary})` : ''}`;
+      confidenceNote =
+        'Safety Escalation Active: High-risk chemical dosage or severe disease query requires certified human agronomist verification.';
+    } else if (topScheme) {
+      const verifyWarningTe =
+        topScheme.verificationStatus !== 'Verified Scheme'
+          ? ' గమనిక: ఈ పథకం "Requires Verification" స్థితిలో ఉంది — దరఖాస్తు చేసే ముందు గ్రామ రైతు సేవా కేంద్రంలో తాజా గడువు తేదీలను తప్పనిసరిగా నిర్ధారించుకోండి.'
+          : '';
+      const verifyWarningEn =
+        topScheme.verificationStatus !== 'Verified Scheme'
+          ? ' Note: This record is marked "Requires Verification" — confirm active seasonal deadlines at your local Rythu Seva Kendra before applying.'
+          : '';
       replyText = isTelugu
-        ? `నమస్కారం ${params.farmerContext.name} గారు. మీ ప్రాంతానికి సంబంధించిన పథకం వివరాలు: ${topScheme.schemeName} (${topScheme.verificationStatus}). ప్రయోజనం: ${topScheme.benefits}. అర్హత: ${topScheme.eligibilityConditions}. అధికారిక పోర్టల్: ${topScheme.officialPortal}. దయచేసి దరఖాస్తు చేసే ముందు మీ గ్రామ రైతు సేవా కేంద్రంలో తాజా గడువు తేదీలను నిర్ధారించుకోండి.`
-        : `Hello ${params.farmerContext.name}. Relevant scheme from our verified catalogue: ${topScheme.schemeName} (${topScheme.verificationStatus}). Benefits: ${topScheme.benefits}. Eligibility: ${topScheme.eligibilityConditions}. Official Portal: ${topScheme.officialPortal}. Always verify current seasonal deadlines at your local Rythu Seva Kendra.`;
+        ? `నమస్కారం ${greetingNameTe}. AGRISETU పథకాల సమాచారం నుండి: ${topScheme.schemeName} (${topScheme.verificationStatus}, చివరిగా పరిశీలించిన తేదీ: ${topScheme.lastVerifiedDate}). ప్రయోజనం: ${topScheme.benefits}. అర్హత: ${topScheme.eligibilityConditions}. అధికారిక పోర్టల్: ${topScheme.officialSourceUrl || topScheme.officialPortal}.${verifyWarningTe}`
+        : `Hello ${greetingNameEn}. From AGRISETU scheme records: ${topScheme.schemeName} (${topScheme.verificationStatus}, last verified ${topScheme.lastVerifiedDate}). Benefits: ${topScheme.benefits}. Eligibility: ${topScheme.eligibilityConditions}. Official portal: ${topScheme.officialSourceUrl || topScheme.officialPortal}.${verifyWarningEn}`;
+      confidenceNote = `Verified Scheme Catalogue Record (${topScheme.schemeCode}, last verified ${topScheme.lastVerifiedDate}). Always verify live seasonal cut-off dates on the official portal.`;
     } else if (topDoc) {
+      const profileNoteTe = allowProfile
+        ? `మీ అనుమతితో జతచేసిన ప్రొఫైల్ (${params.farmerContext.district}, ${params.farmerContext.soilType}, పంట: ${params.farmerContext.currentCrop}) ఆధారంగా — `
+        : '';
+      const profileNoteEn = allowProfile
+        ? `Using your consented farm profile (${params.farmerContext.district}, ${params.farmerContext.soilType}, crop: ${params.farmerContext.currentCrop}) — `
+        : '';
       replyText = isTelugu
-        ? `నమస్కారం ${params.farmerContext.name} గారు. ${params.farmerContext.profileShared ? `మీ ${params.farmerContext.district} ప్రాంతం (${params.farmerContext.soilType}, ప్రస్తుత పంట: ${params.farmerContext.currentCrop}) ఆధారంగా: ` : ''}${topDoc.summary} ఆధారం: ${topDoc.sourceName}. మీ పొలంలో ఈ లక్షణాలు ఎన్ని రోజులుగా కనిపిస్తున్నాయి మరియు ఇటీవల ఏదైనా ఎరువు వేశారా?`
-        : `Hello ${params.farmerContext.name}. ${params.farmerContext.profileShared ? `Based on your consented profile in ${params.farmerContext.district} (${params.farmerContext.soilType}, crop: ${params.farmerContext.currentCrop}): ` : ''}${topDoc.content} (Source: ${topDoc.sourceName}). To guide you better, how many days ago did you notice this condition, and what was your last irrigation or fertiliser application?`;
+        ? `నమస్కారం ${greetingNameTe}. ${profileNoteTe}AGRISETU ధృవీకరించిన సమాచారం ప్రకారం: ${topDoc.summary} (ఆధారం: ${topDoc.sourceName}, చివరిగా ధృవీకరించిన తేదీ: ${topDoc.lastVerifiedDate}). మరింత ఖచ్చితమైన సూచన కోసం మీ పంట విత్తిన ఎన్ని రోజులు అయిందో తెలియజేయగలరా?`
+        : `Hello ${greetingNameEn}. ${profileNoteEn}From verified AGRISETU knowledge base: ${topDoc.content} (Source: ${topDoc.sourceName}, last verified: ${topDoc.lastVerifiedDate}). To tailor guidance further, how many days ago was the crop sown and what is the current field moisture condition?`;
+      confidenceNote = `Verified Knowledge Base Match: ${topDoc.sourceName} (Last verified: ${topDoc.lastVerifiedDate}). Does not replace on-field inspection.`;
     } else {
+      // Honest no-match response: NEVER cite a random document or invent details
+      evidenceBasis = 'general_ai_explanation';
       replyText = isTelugu
-        ? `నమస్కారం ${params.farmerContext.name} గారు. మీ ప్రశ్నను అర్థం చేసుకున్నాను. మరింత ఖచ్చితమైన సూచన కోసం మీ పంట వయస్సు (విత్తిన ఎన్ని రోజులు అయింది), నేల తేమ పరిస్థితి మరియు లక్షణాలు ఆకులపై ఎలా ఉన్నాయో తెలియజేయగలరా?`
-        : `Hello ${params.farmerContext.name}. Could you share your current crop stage (days after sowing/planting) and recent field moisture condition so I can provide grounded guidance?`;
+        ? `నమస్కారం ${greetingNameTe}. మీరు అడిగిన అంశానికి సంబంధించి ప్రస్తుతం AGRISETU ధృవీకరించిన విజ్ఞాన భాండాగారంలో (Knowledge Base) లేదా ప్రభుత్వ పథకాల జాబితాలో సరిపోయే రికార్డు లేదు. నేను ధృవీకరించని సమాచారాన్ని ఊహించి చెప్పను. దయచేసి మీ పంట పేరు, పంట దశ (విత్తిన ఎన్ని రోజులు అయింది), మరియు మీరు గమనిస్తున్న నిర్దిష్ట లక్షణాలను తెలియజేయండి — లేదా క్షేత్రస్థాయి సలహా కోసం వ్యవసాయ నిపుణులను (Expert Review) సంప్రదించండి.`
+        : `Hello ${greetingNameEn}. AGRISETU does not currently have a verified knowledge-base advisory or scheme record matching this specific question, and will not invent unverified details. Could you clarify the exact crop name, crop stage (days after sowing), and specific field concern? For specialized diagnosis, we recommend requesting an Agricultural Expert review or consulting your local Rythu Seva Kendra.`;
+      confidenceNote =
+        'No Verified Knowledge Base Match: AGRISETU found 0 verified records meeting the relevance threshold for this query.';
     }
+
+    const followUps = safety.isHighRisk
+      ? isTelugu
+        ? [
+            'మీ పంట రకం మరియు విత్తిన/నాటిన తర్వాత ఎన్ని రోజులు అయింది?',
+            'పొలంలో ఎంత శాతం మొక్కలలో ఈ లక్షణాలు కనిపిస్తున్నాయి?',
+          ]
+        : safety.missingDiagnosticPrompts
+      : isTelugu
+        ? [
+            'మీరు ఏ పంట గురించి మరియు ఏ దశ (విత్తిన ఎన్ని రోజులు) గురించి అడుగుతున్నారు?',
+            'గత వారం రోజుల్లో సాగునీరు లేదా ఎరువుల వివరాలు ఏమిటి?',
+          ]
+        : [
+            'Which specific crop and growth stage (days after sowing/transplanting) are you asking about?',
+            'What is the current soil moisture or drainage condition in your field?',
+          ];
 
     return {
       replyText,
-      followUpQuestions: isTelugu
-        ? [
-            'మీ పంట విత్తిన/నాటిన తర్వాత ఎన్ని రోజులు అయింది?',
-            'గత వారం రోజుల్లో వర్షం పడిందా లేదా ఏదైనా ఎరువు వేశారా?',
-          ]
-        : [
-            'How many days has it been since sowing or transplanting?',
-            'Have you applied any fertiliser or experienced heavy rain in the past 7 days?',
-          ],
-      shouldEscalate: highRiskTrigger,
-      escalationCategory: highRiskTrigger ? 'Pest & Chemical Safety' : 'General Advisory',
-      escalationReason: highRiskTrigger
-        ? 'Farmer requested chemical dosage / high-risk pest intervention requiring certified agronomist review.'
-        : '',
-      confidenceNote:
-        'Demo Mode: Grounded response generated from verified AGRISETU agricultural advisories.',
-      citations,
+      followUpQuestions: followUps,
+      shouldEscalate: safety.isHighRisk,
+      escalationCategory: safety.isHighRisk ? safety.escalationCategory : 'General Advisory',
+      escalationReason: safety.escalationReason,
+      confidenceNote,
+      evidenceBasis,
+      citations: hasVerifiedMatch ? citations : [],
       demoFallback: true,
     };
   }
@@ -184,42 +224,42 @@ export async function generateAgriculturalGuidance(params: {
     DIALECT_GUIDANCE[params.farmerContext.dialectProfile] || DIALECT_GUIDANCE.kakinada_coastal;
 
   const customVocabText =
-    params.farmerContext.customVocabulary.length > 0
+    allowProfile && params.farmerContext.customVocabulary.length > 0
       ? params.farmerContext.customVocabulary
           .map((v) => `- "${v.term}": ${v.meaning}`)
           .join('\n')
-      : 'None added yet.';
+      : 'No personal custom vocabulary shared.';
 
-  const farmerProfileBlock = params.farmerContext.profileShared
+  const farmerProfileBlock = allowProfile
     ? `CONSENTED FARMER PROFILE:
-- Name: ${params.farmerContext.name}
+- Name: ${params.farmerContext.name || 'Farmer'}
 - Location: ${params.farmerContext.village}, ${params.farmerContext.mandal} Mandal, ${params.farmerContext.district} (${params.farmerContext.region})
 - Farm Size: ${params.farmerContext.farmAreaAcres} acres
 - Soil: ${params.farmerContext.soilType} (pH: ${params.farmerContext.phLevel || 'Not tested'}, Salinity: ${params.farmerContext.salinityNote || 'Unknown'})
 - Irrigation: ${params.farmerContext.irrigationType}
 - Previous Crop: ${params.farmerContext.previousCrop || 'Not recorded'}
 - Current Crop: ${params.farmerContext.currentCrop || 'Not recorded'}`
-    : `FARMER CONSENT NOTICE: Farmer ${params.farmerContext.name} has disabled AI profile sharing. Do NOT assume soil, location, or crop details unless stated in the message—politely ask for them if needed.`;
+    : `FARMER PRIVACY & CONSENT NOTICE: Profile sharing with AI is OFF. Zero personal, location, soil, or crop records are provided. Do NOT assume any location, soil, or crop details unless explicitly stated in the current message; politely ask clarifying questions if needed.`;
 
   const ragKnowledgeBlock =
     params.knowledgeDocs.length > 0
       ? params.knowledgeDocs
           .map(
             (k) =>
-              `[Knowledge #${k.id} | ${k.category} | Source: ${k.sourceName} | Status: ${k.verificationStatus} (${k.lastVerifiedDate})]\nTitle: ${k.title}\nContent: ${k.content}`
+              `[Verified Knowledge #${k.id} | ${k.category} | Source: ${k.sourceName} | Status: ${k.verificationStatus} | Last Verified: ${k.lastVerifiedDate}]\nTitle: ${k.title}\nContent: ${k.content}`
           )
           .join('\n\n')
-      : 'No exact knowledge document matched; rely strictly on safe general agronomic principles and ask clarifying questions.';
+      : 'NO VERIFIED KNOWLEDGE BASE RECORD MATCHED THIS QUESTION.';
 
   const ragSchemeBlock =
     params.schemes.length > 0
       ? params.schemes
           .map(
             (s) =>
-              `[Scheme ${s.schemeCode} | ${s.schemeName} | ${s.level} (${s.applicableState}) | Verification: ${s.verificationStatus} (${s.lastVerifiedDate})]\nEligibility: ${s.eligibilityConditions}\nBenefits: ${s.benefits}\nPortal: ${s.officialPortal}`
+              `[Scheme ${s.schemeCode} | ${s.schemeName} | ${s.level} (${s.applicableState}) | Status: ${s.verificationStatus} | Last Verified: ${s.lastVerifiedDate}]\nEligibility: ${s.eligibilityConditions}\nBenefits: ${s.benefits}\nOfficial Source: ${s.officialSource || s.officialPortal} (${s.officialSourceUrl || s.officialPortal})`
           )
           .join('\n\n')
-      : 'No specific scheme record matched.';
+      : 'NO VERIFIED GOVERNMENT SCHEME RECORD MATCHED THIS QUESTION.';
 
   const historyBlock =
     params.history.length > 0
@@ -229,32 +269,36 @@ export async function generateAgriculturalGuidance(params: {
           .join('\n')
       : 'Start of conversation.';
 
-  const systemInstruction = `You are AGRISETU AI Farmer Assistant, a trustworthy, voice-friendly agricultural advisor for farmers in Andhra Pradesh & Telangana.
+  const systemInstruction = `You are AGRISETU AI Farmer Assistant, a transparent, voice-friendly agricultural advisor for farmers in Andhra Pradesh & Telangana.
 
 RESPONSE LANGUAGE REQUIREMENT:
 ${
-  params.responseLanguage === 'te'
-    ? `Respond naturally in Telugu script (తెలుగు). ${dialectInstruction} Keep sentences clear, warm, spoken-friendly (for phone call TTS), and explain any technical agricultural term in simple everyday farmer language.`
+  isTelugu
+    ? `Respond naturally in Telugu script (తెలుగు). ${dialectInstruction} Keep sentences clear, warm, and spoken-friendly, explaining technical terms in everyday farmer language.`
     : `Respond clearly in simple, accessible English while understanding any regional Telugu agricultural words the farmer uses.`
 }
 
-REGIONAL VOCABULARY & PHRASE DICTIONARY:
+REGIONAL VOCABULARY HINTS:
 ${customVocabText}
 
 ${farmerProfileBlock}
 
-RETRIEVED AGRICULTURAL KNOWLEDGE BASE (RAG):
+RETRIEVED AGRICULTURAL KNOWLEDGE BASE (VERIFIED FACTS):
 ${ragKnowledgeBlock}
 
 RETRIEVED GOVERNMENT SCHEMES CATALOGUE:
 ${ragSchemeBlock}
 
-STRICT SAFETY & RESPONSIBLE AI RULES (NON-NEGOTIABLE):
-1. NEVER invent exact chemical pesticide dosages, toxic spray mixes, guaranteed crop yields, guaranteed profits, live market prices, or unverified government scheme eligibility/deadlines.
-2. If a scheme is marked "Requires Verification", explicitly tell the farmer to verify current availability and deadlines at their local Rythu Seva Kendra or official portal.
-3. Ask 1–2 concise follow-up questions when important diagnostic context is missing (e.g., crop age, symptom distribution, soil moisture, recent fertiliser).
-4. Set shouldEscalate = true whenever the farmer asks for specific chemical pesticide dosages, describes severe/ambiguous crop disease/pest outbreak, or faces high-risk crop loss decisions, and advise consulting a local Agricultural Officer / KVK specialist.
-5. Keep replyText concise (3–6 short spoken-friendly sentences) suitable for reading aloud on a farm call.`;
+STRICT TRANSPARENCY, EVIDENCE & SAFETY RULES (NON-NEGOTIABLE):
+1. Clearly distinguish between:
+   (a) Verified AGRISETU Knowledge Base / Scheme facts (cite the source name and last-verified date when used),
+   (b) General AI agronomic explanation (if NO VERIFIED RECORD MATCHED above, explicitly state that AGRISETU has no verified knowledge-base record for this specific query before giving safe general context or asking clarifying questions), and
+   (c) Illustrative estimates (never present estimates as verified market prices or guaranteed yields).
+2. NEVER invent chemical pesticide dosages, fertilizer chemical quantities, toxic tank mixes, guaranteed crop yields, guaranteed profits, live market prices, or unverified government scheme eligibility/deadlines/sources.
+3. If a scheme is marked "Requires Verification", explicitly advise confirming active seasonal dates at the local Rythu Seva Kendra or official portal.
+4. Ask 1–2 concise clarifying questions when key diagnostic details (crop stage, moisture, symptom distribution, variety) are missing.
+5. Set shouldEscalate = true whenever the query involves pesticide selection/dosage, chemical/fertilizer dosage, severe or ambiguous crop disease, or major crop-loss risk, and advise consulting a Mandal Agricultural Officer / KVK specialist.
+6. Keep replyText concise (3–6 short spoken-friendly sentences).`;
 
   const response = await ai.models.generateContent({
     model: textModel,
@@ -272,15 +316,15 @@ STRICT SAFETY & RESPONSIBLE AI RULES (NON-NEGOTIABLE):
           followUpQuestions: {
             type: Type.ARRAY,
             items: { type: Type.STRING },
-            description: '1 to 2 helpful follow-up questions in the requested language.',
+            description: '1 to 2 helpful clarifying follow-up questions in the requested language.',
           },
           shouldEscalate: {
             type: Type.BOOLEAN,
-            description: 'True if uncertain, high-risk, or chemical dosage / severe disease query.',
+            description: 'True if uncertain, high-risk, chemical/fertilizer dosage, or severe disease query.',
           },
           escalationCategory: {
             type: Type.STRING,
-            description: 'Short category if escalated, e.g. Pest & Disease Diagnosis, Soil Salinity, Scheme Eligibility.',
+            description: 'Short category if escalated.',
           },
           escalationReason: {
             type: Type.STRING,
@@ -288,7 +332,7 @@ STRICT SAFETY & RESPONSIBLE AI RULES (NON-NEGOTIABLE):
           },
           confidenceNote: {
             type: Type.STRING,
-            description: 'Short transparent note on sources used and any uncertainty.',
+            description: 'Transparent note distinguishing verified KB sources (with last verified date) vs general AI explanation.',
           },
         },
         required: [
@@ -306,20 +350,31 @@ STRICT SAFETY & RESPONSIBLE AI RULES (NON-NEGOTIABLE):
   const rawText = (response.text ?? '{}').trim();
   const parsed = JSON.parse(rawText);
 
-  const finalEscalate = Boolean(parsed.shouldEscalate || highRiskTrigger);
+  const finalEscalate = Boolean(parsed.shouldEscalate || safety.isHighRisk);
+  const evidenceBasis: AssistantTurnResponse['evidenceBasis'] = finalEscalate
+    ? 'safety_escalation'
+    : hasVerifiedMatch
+      ? 'verified_knowledge_base'
+      : 'general_ai_explanation';
 
   return {
     replyText: parsed.replyText || 'క్షమించండి, దయచేసి మీ ప్రశ్నను మరోసారి అడగండి.',
     followUpQuestions: Array.isArray(parsed.followUpQuestions) ? parsed.followUpQuestions : [],
     shouldEscalate: finalEscalate,
-    escalationCategory: parsed.escalationCategory || 'Agronomic Review',
+    escalationCategory:
+      parsed.escalationCategory ||
+      (safety.isHighRisk ? safety.escalationCategory : 'Agronomic Review'),
     escalationReason:
       parsed.escalationReason ||
-      (highRiskTrigger ? 'High-risk dosage or pest management query flagged for expert review.' : ''),
+      safety.escalationReason ||
+      (finalEscalate ? 'Flagged for certified agricultural specialist review.' : ''),
     confidenceNote:
       parsed.confidenceNote ||
-      'Grounded in AGRISETU Knowledge Base; does not replace field inspection by an Agricultural Officer.',
-    citations,
+      (hasVerifiedMatch
+        ? 'Grounded in verified AGRISETU Knowledge Base records; does not replace field inspection.'
+        : 'General AI explanation (no verified AGRISETU Knowledge Base record matched this query).'),
+    evidenceBasis,
+    citations: hasVerifiedMatch ? citations : [],
     demoFallback: false,
   };
 }
@@ -328,25 +383,26 @@ export async function transcribeRegionalTeluguAudio(params: {
   audioBase64: string;
   mimeType: string;
   dialectProfile: string;
+  profileShared?: boolean;
   customVocabulary: Array<{ term: string; meaning: string }>;
 }): Promise<{ transcript: string; demoFallback: boolean }> {
   const ai = getAiClient();
   const sttModel = process.env.AI_STT_MODEL || 'gemini-3.5-transcribe';
 
   if (!ai) {
-    throw new Error(
-      'Demo Mode active: Using browser voice recognition or text input.'
-    );
+    throw new Error('Demo Mode active: Using browser voice recognition or text input.');
   }
 
-  const vocabHints = params.customVocabulary
-    .map((v) => `${v.term} (${v.meaning})`)
-    .join(', ');
+  // Respect farmer AI privacy consent for custom vocabulary hints as well
+  const vocabHints =
+    params.profileShared === true && params.customVocabulary.length > 0
+      ? params.customVocabulary.map((v) => `${v.term} (${v.meaning})`).join(', ')
+      : '';
 
   const dialectLabel =
-    params.dialectProfile === 'godavari_delta'
+    params.profileShared === true && params.dialectProfile === 'godavari_delta'
       ? 'Godavari regional Telugu (Konaseema/Godavari agricultural terms)'
-      : 'Kakinada coastal Telugu (East Godavari/Kakinada coastal agricultural terms)';
+      : 'Telugu and English agricultural speech';
 
   const response = await ai.models.generateContent({
     model: sttModel,
@@ -359,7 +415,7 @@ export async function transcribeRegionalTeluguAudio(params: {
           },
         },
         {
-          text: `Transcribe this spoken farmer audio accurately. The speaker uses ${dialectLabel}, possibly mixing Telugu and English agricultural words. Regional vocabulary hints: ${vocabHints || 'వరి, చేను, బోదె, దోమపోటు, లంక భూమి, గెల, పసుపు, ఎరువు, PM-KISAN'}. Output ONLY the exact transcribed speech text (in Telugu script for Telugu speech, preserving clear English scheme/crop codes if spoken) without commentary.`,
+          text: `Transcribe this spoken farmer audio accurately (${dialectLabel}). Regional vocabulary hints: ${vocabHints || 'వరి, చేను, బోదె, దోమపోటు, లంక భూమి, గెల, పసుపు, ఎరువు, PM-KISAN'}. Output ONLY the exact transcribed speech text without commentary.`,
         },
       ],
     },
@@ -393,7 +449,7 @@ export async function synthesizeTeluguSpeech(params: {
             speechMetadata: {
               style:
                 params.language === 'te'
-                  ? 'Warm, patient, clear Telugu agricultural advisor speaking on a phone call'
+                  ? 'Warm, patient, clear Telugu agricultural advisor'
                   : 'Warm, clear, approachable agricultural advisor',
             },
           },

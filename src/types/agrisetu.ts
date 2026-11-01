@@ -13,6 +13,7 @@ export interface FarmerConsentRecord {
   shareProfileWithMerchants: boolean;
   shareContactOnEnquiry: boolean;
   shareConversationWithExperts: boolean;
+  saveConversationHistory: boolean;
 }
 
 export interface FarmDetailsRecord {
@@ -114,6 +115,7 @@ export interface SchemeRecord {
   relevantOffice: string;
   importantDates: string;
   officialSource: string;
+  officialSourceUrl?: string | null;
   verificationStatus: string;
   lastVerifiedDate: string;
   isOutdated: boolean;
@@ -205,6 +207,7 @@ export interface FarmerOfferRecord {
   qualityDetails: string;
   message: string | null;
   status: string;
+  farmerDisplayName?: string;
   createdAt: string;
 }
 
@@ -346,19 +349,46 @@ export interface CropSuitabilityOption {
   suitabilityBand: 'High Agronomic Suitability' | 'Conditional Suitability' | 'Evaluate With Caution';
   ruleScore: number;
   whySuitable: string;
+  keyFactors?: string[];
   soilRequirements: string;
   irrigationConsiderations: string;
   importantConstraints: string;
   rotationBenefit: string;
   marketDemandSignal: string;
+  recommendationStage?: string;
   isDemoRuleModel: boolean;
 }
 
 export interface CropSuitabilityResult {
+  evaluationMethod?: string;
   disclaimer: string;
   missingInformation: string[];
   evaluatedInputsSummary: string;
   options: CropSuitabilityOption[];
+}
+
+export interface DemoPersonaSummary {
+  farmers: Array<{
+    id: number;
+    name: string;
+    nameTe?: string | null;
+    region: string;
+    district: string;
+  }>;
+  merchants: Array<{
+    id: number;
+    businessName: string;
+    buyerType: string;
+    district: string;
+  }>;
+}
+
+export interface CurrentActorSummary {
+  role: 'farmer' | 'merchant' | 'coordinator';
+  farmerId: number | null;
+  merchantId: number | null;
+  displayName: string;
+  isDemo: boolean;
 }
 
 export interface BootstrapData {
@@ -376,6 +406,8 @@ export interface BootstrapData {
   harvests: HarvestRecord[];
   escalations: ExpertEscalationRecord[];
   notifications: NotificationRecord[];
+  currentActor?: CurrentActorSummary;
+  demoModeEnabled?: boolean;
+  demoPersonas?: DemoPersonaSummary;
   aiRuntime: AiRuntimeStatus;
 }
-

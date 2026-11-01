@@ -14,14 +14,12 @@ import type { BootstrapData, ProduceListingRecord } from '../types/agrisetu.ts';
 
 type MerchantSubView = 'produce' | 'dashboard' | 'publish_demand';
 
-const ENQUIRY_STATUSES = [
-  'Enquiry received',
-  'Under discussion',
+const OFFER_RESPONSE_STATUSES = [
   'Offer made',
+  'Under discussion',
   'Accepted',
-  'Rejected',
   'Confirmed order',
-  'Completed',
+  'Rejected',
   'Cancelled',
 ];
 
@@ -78,6 +76,7 @@ export const MerchantMarketTab: React.FC = () => {
   const merchants = data?.merchants || [];
   const activeMerchant =
     merchants.find((m) => m.id === selectedMerchantId) || merchants[0];
+  const demoMerchantOptions = data?.demoPersonas?.merchants || merchants;
 
   if (!activeMerchant) {
     return (
@@ -302,20 +301,22 @@ export const MerchantMarketTab: React.FC = () => {
             </h2>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="text-xs font-medium text-[#4B5E52]">Active Buyer Account:</label>
-            <select
-              value={activeMerchant.id}
-              onChange={(e) => setSelectedMerchantId(Number(e.target.value))}
-              className="px-3 py-2 text-sm border border-[#D4DCD2] rounded-lg bg-white focus:outline-none focus:border-[#1B4332]"
-            >
-              {merchants.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.businessName} ({m.buyerType})
-                </option>
-              ))}
-            </select>
-          </div>
+          {activeMerchant.isDemo && (
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="text-xs font-medium text-[#4B5E52]">Active Buyer Account:</label>
+              <select
+                value={activeMerchant.id}
+                onChange={(e) => setSelectedMerchantId(Number(e.target.value))}
+                className="px-3 py-2 text-sm border border-[#D4DCD2] rounded-lg bg-white focus:outline-none focus:border-[#1B4332]"
+              >
+                {demoMerchantOptions.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.businessName} ({m.buyerType})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* High-Density KPI Row */}
@@ -678,17 +679,37 @@ export const MerchantMarketTab: React.FC = () => {
                             {enq.logisticsPreference}
                           </td>
                           <td className="py-3 pl-3">
-                            <select
-                              value={enq.status}
-                              onChange={(e) => handleEnquiryStatusChange(enq.id, e.target.value)}
-                              className="px-2.5 py-1.5 text-xs border border-[#D4DCD2] rounded-lg bg-white"
-                            >
-                              {ENQUIRY_STATUSES.map((st) => (
-                                <option key={st} value={st}>
-                                  {st}
-                                </option>
-                              ))}
-                            </select>
+                            {enq.status === 'Confirmed order' ||
+                            enq.status === 'Rejected' ||
+                            enq.status === 'Cancelled' ? (
+                              <span className="text-xs font-medium text-[#2D6A4F]">
+                                {enq.status}
+                              </span>
+                            ) : enq.status === 'Accepted' ? (
+                              <select
+                                value={enq.status}
+                                onChange={(e) => handleEnquiryStatusChange(enq.id, e.target.value)}
+                                className="px-2.5 py-1.5 text-xs border border-[#D4DCD2] rounded-lg bg-white"
+                              >
+                                <option value="Accepted">Accepted (Ready to Confirm)</option>
+                                <option value="Confirmed order">Confirmed order</option>
+                                <option value="Cancelled">Cancelled</option>
+                              </select>
+                            ) : (
+                              <select
+                                value={enq.status}
+                                onChange={(e) => handleEnquiryStatusChange(enq.id, e.target.value)}
+                                className="px-2.5 py-1.5 text-xs border border-[#D4DCD2] rounded-lg bg-white"
+                              >
+                                {Array.from(
+                                  new Set([enq.status, 'Under discussion', 'Cancelled'])
+                                ).map((st) => (
+                                  <option key={st} value={st}>
+                                    {st}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
                           </td>
                         </tr>
                       );
@@ -725,7 +746,6 @@ export const MerchantMarketTab: React.FC = () => {
                   <tbody className="divide-y divide-[#EEF1EC]">
                     {merchantIncomingOffers.map((off) => {
                       const dem = (data?.demands || []).find((d) => d.id === off.demandId);
-                      const farmer = (data?.farmers || []).find((f) => f.id === off.farmerId);
                       return (
                         <tr key={off.id} className="hover:bg-[#F9FBF8]">
                           <td className="py-3 pr-4">
@@ -733,7 +753,7 @@ export const MerchantMarketTab: React.FC = () => {
                               {dem?.cropName || `Demand #${off.demandId}`}
                             </p>
                             <p className="text-xs text-[#4B5E52]">
-                              {farmer ? `${farmer.name} (${farmer.village})` : `Farmer #${off.farmerId}`}
+                              {off.farmerDisplayName || `Protected Farmer #${off.farmerId}`}
                             </p>
                           </td>
                           <td className="py-3 px-3 text-right font-mono-num">
@@ -749,17 +769,35 @@ export const MerchantMarketTab: React.FC = () => {
                             {off.qualityDetails}
                           </td>
                           <td className="py-3 pl-3">
-                            <select
-                              value={off.status}
-                              onChange={(e) => handleOfferStatusChange(off.id, e.target.value)}
-                              className="px-2.5 py-1.5 text-xs border border-[#D4DCD2] rounded-lg bg-white"
-                            >
-                              {ENQUIRY_STATUSES.map((st) => (
-                                <option key={st} value={st}>
-                                  {st}
-                                </option>
-                              ))}
-                            </select>
+                            {off.status === 'Confirmed order' ||
+                            off.status === 'Rejected' ||
+                            off.status === 'Cancelled' ? (
+                              <span className="text-xs font-medium text-[#2D6A4F]">
+                                {off.status}
+                              </span>
+                            ) : off.status === 'Accepted' ? (
+                              <select
+                                value={off.status}
+                                onChange={(e) => handleOfferStatusChange(off.id, e.target.value)}
+                                className="px-2.5 py-1.5 text-xs border border-[#D4DCD2] rounded-lg bg-white"
+                              >
+                                <option value="Accepted">Accepted</option>
+                                <option value="Confirmed order">Confirmed order</option>
+                                <option value="Cancelled">Cancelled</option>
+                              </select>
+                            ) : (
+                              <select
+                                value={off.status}
+                                onChange={(e) => handleOfferStatusChange(off.id, e.target.value)}
+                                className="px-2.5 py-1.5 text-xs border border-[#D4DCD2] rounded-lg bg-white"
+                              >
+                                {OFFER_RESPONSE_STATUSES.map((st) => (
+                                  <option key={st} value={st}>
+                                    {st}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
                           </td>
                         </tr>
                       );
@@ -811,15 +849,22 @@ export const MerchantMarketTab: React.FC = () => {
                         </td>
                         <td className="py-3 px-3 font-mono-num text-xs">{ord.scheduledDate}</td>
                         <td className="py-3 pl-3">
-                          <select
-                            value={ord.orderStatus}
-                            onChange={(e) => handleOrderStatusChange(ord.id, e.target.value)}
-                            className="px-2.5 py-1.5 text-xs border border-[#D4DCD2] rounded-lg bg-white"
-                          >
-                            <option value="Confirmed order">Confirmed order</option>
-                            <option value="Completed">Completed</option>
-                            <option value="Cancelled">Cancelled</option>
-                          </select>
+                          {ord.orderStatus === 'Completed' || ord.orderStatus === 'Cancelled' ? (
+                            <span className="text-xs font-medium text-[#16A34A]">
+                              {ord.orderStatus}
+                            </span>
+                          ) : (
+                            <select
+                              value={ord.orderStatus}
+                              onChange={(e) => handleOrderStatusChange(ord.id, e.target.value)}
+                              className="px-2.5 py-1.5 text-xs border border-[#D4DCD2] rounded-lg bg-white"
+                            >
+                              <option value="Confirmed order">Confirmed order</option>
+                              <option value="In transit / Scheduled">In transit / Scheduled</option>
+                              <option value="Completed">Completed</option>
+                              <option value="Cancelled">Cancelled</option>
+                            </select>
+                          )}
                         </td>
                       </tr>
                     ))}

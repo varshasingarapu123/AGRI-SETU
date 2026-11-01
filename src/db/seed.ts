@@ -72,6 +72,20 @@ export async function ensureDemoSeedData(): Promise<void> {
             isDemo: true,
           },
           {
+            uid: 'demo-merchant-konaseema',
+            email: 'konaseema.processing@agrisetu.example',
+            displayName: 'Konaseema Fruit & Spice Processing Pvt. Ltd. (Demo)',
+            role: 'merchant',
+            isDemo: true,
+          },
+          {
+            uid: 'demo-merchant-coromandel',
+            email: 'coromandel.millers@agrisetu.example',
+            displayName: 'Coromandel Pulse & Spice Millers (Demo)',
+            role: 'merchant',
+            isDemo: true,
+          },
+          {
             uid: 'demo-coordinator-pilot',
             email: 'coordinator.pilot@agrisetu.example',
             displayName: 'AGRISETU Pilot Coordinator',
@@ -86,6 +100,8 @@ export async function ensureDemoSeedData(): Promise<void> {
       const lakshmiUserId = insertedUsers[1]?.id ?? null;
       const merch1UserId = insertedUsers[2]?.id ?? null;
       const merch2UserId = insertedUsers[3]?.id ?? null;
+      const merch3UserId = insertedUsers[4]?.id ?? null;
+      const merch4UserId = insertedUsers[5]?.id ?? null;
 
       // 2. Seed Two Fictional Demo Farmer Profiles (Ramu & Lakshmi)
       const insertedFarmers = await db
@@ -141,7 +157,7 @@ export async function ensureDemoSeedData(): Promise<void> {
       const ramu = insertedFarmers[0];
       const lakshmi = insertedFarmers[1];
 
-      // 3. Farmer Consent
+      // 3. Farmer Consent (explicitly opted-in only for fictional demo profiles; schema default is false)
       await db.insert(farmerConsent).values([
         {
           farmerId: ramu.id,
@@ -149,6 +165,7 @@ export async function ensureDemoSeedData(): Promise<void> {
           shareProfileWithMerchants: true,
           shareContactOnEnquiry: false,
           shareConversationWithExperts: true,
+          saveConversationHistory: true,
         },
         {
           farmerId: lakshmi.id,
@@ -156,6 +173,7 @@ export async function ensureDemoSeedData(): Promise<void> {
           shareProfileWithMerchants: true,
           shareContactOnEnquiry: true,
           shareConversationWithExperts: true,
+          saveConversationHistory: true,
         },
       ]);
 
@@ -484,6 +502,7 @@ export async function ensureDemoSeedData(): Promise<void> {
           importantDates:
             'Ongoing registration; e-KYC must be active prior to each four-monthly installment release cycle.',
           officialSource: 'Ministry of Agriculture & Farmers Welfare, Government of India (pmkisan.gov.in)',
+          officialSourceUrl: 'https://pmkisan.gov.in',
           verificationStatus: 'Verified',
           lastVerifiedDate: '2026-10-01',
           isOutdated: false,
@@ -509,6 +528,7 @@ export async function ensureDemoSeedData(): Promise<void> {
           importantDates:
             'Seasonal enrolment cut-offs vary by State Kharif/Rabi notification — verify current district notification before applying.',
           officialSource: 'Ministry of Agriculture & Farmers Welfare, Govt. of India (pmfby.gov.in)',
+          officialSourceUrl: 'https://pmfby.gov.in',
           verificationStatus: 'Verified',
           lastVerifiedDate: '2026-09-25',
           isOutdated: false,
@@ -533,6 +553,7 @@ export async function ensureDemoSeedData(): Promise<void> {
           relevantOffice: 'Local Bank Branch / Primary Agricultural Cooperative Society (PACS)',
           importantDates: 'Open year-round aligned with Kharif and Rabi crop seasons.',
           officialSource: 'NABARD / Department of Financial Services & Ministry of Agriculture (myscheme.gov.in)',
+          officialSourceUrl: 'https://www.myscheme.gov.in/schemes/kcc',
           verificationStatus: 'Verified',
           lastVerifiedDate: '2026-10-04',
           isOutdated: false,
@@ -558,6 +579,7 @@ export async function ensureDemoSeedData(): Promise<void> {
           importantDates:
             'Requires Verification — Verify current Kharif/Rabi e-Panta window and tranche dates at your Village Rythu Seva Kendra.',
           officialSource: 'Department of Agriculture, Government of Andhra Pradesh',
+          officialSourceUrl: 'https://karshak.ap.gov.in',
           verificationStatus: 'Requires Verification',
           lastVerifiedDate: '2026-07-10',
           isOutdated: false,
@@ -581,6 +603,7 @@ export async function ensureDemoSeedData(): Promise<void> {
           relevantOffice: 'Cluster AEO / Mandal Agricultural Officer, Telangana',
           importantDates: 'Requires Verification — Seasonal release dates notified by Govt. of Telangana.',
           officialSource: 'Department of Agriculture, Government of Telangana',
+          officialSourceUrl: 'https://agri.telangana.gov.in',
           verificationStatus: 'Requires Verification',
           lastVerifiedDate: '2026-06-20',
           isOutdated: false,
@@ -618,7 +641,7 @@ export async function ensureDemoSeedData(): Promise<void> {
             isDemo: true,
           },
           {
-            userId: null,
+            userId: merch3UserId,
             merchantCode: 'MERCH-DEMO-003',
             businessName: 'Konaseema Fruit & Spice Processing Pvt. Ltd. (Demo)',
             buyerType: 'Food Processing Unit',
@@ -631,7 +654,7 @@ export async function ensureDemoSeedData(): Promise<void> {
             isDemo: true,
           },
           {
-            userId: null,
+            userId: merch4UserId,
             merchantCode: 'MERCH-DEMO-004',
             businessName: 'Coromandel Pulse & Spice Millers (Demo)',
             buyerType: 'Direct Merchant',

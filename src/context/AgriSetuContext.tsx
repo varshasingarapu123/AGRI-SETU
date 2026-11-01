@@ -22,6 +22,7 @@ interface AgriSetuContextValue {
   loading: boolean;
   error: string | null;
   firebaseUser: User | null;
+  authReady: boolean;
   uiLang: UiLanguage;
   setUiLang: (lang: UiLanguage) => void;
   activeTab: MainTabId;
@@ -55,7 +56,10 @@ export const AgriSetuProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState<boolean>(false);
+
   const idTokenRef = useRef<string | null>(null);
+  const demoSessionCacheRef = useRef<{ key: string; token: string } | null>(null);
 
   const [uiLang, setUiLang] = useState<UiLanguage>('en');
   const [activeTab, setActiveTab] = useState<MainTabId>('assistant');
@@ -82,25 +86,62 @@ export const AgriSetuProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // Automatically sync role context when navigating to role-specific workspaces
-  const handleSetActiveTab = useCallback((tab: MainTabId) => {
-    setActiveTab(tab);
-    if (tab === 'merchant_market') {
-      setActiveRole('merchant');
-    } else if (tab === 'coordinator') {
-      setActiveRole('coordinator');
-    } else if (tab === 'assistant' || tab === 'farmer_market' || tab === 'my_farm') {
-      setActiveRole('farmer');
+  // Sync role context in controlled Demo Mode when switching workspaces;
+  // for real Firebase-authenticated users, role is strictly server-derived.
+  const handleSetActiveTab = useCallback(
+    (tab: MainTabId) => {
+      setActiveTab(tab);
+      if (!firebaseUser) {
+        if (tab === 'merchant_market') {
+          setActiveRole('merchant');
+        } else if (tab === 'coordinator') {
+          setActiveRole('coordinator');
+        } else {
+          setActiveRole('farmer');
+        }
+      }
+    },
+    [firebaseUser]
+  );
+
+  const acquireDemoBearerToken = useCallback(async (): Promise<string> => {
+    const personaKey = `${activeRole}:${
+      activeRole === 'farmer'
+        ? selectedFarmerId
+        : activeRole === 'merchant'
+          ? selectedMerchantId
+          : 0
+    }`;
+
+    if (demoSessionCacheRef.current && demoSessionCacheRef.current.key === personaKey) {
+      return demoSessionCacheRef.current.token;
     }
-  }, []);
+
+    const res = await fetch('/api/auth/demo-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        role: activeRole,
+        farmerId: activeRole === 'farmer' ? selectedFarmerId : undefined,
+        merchantId: activeRole === 'merchant' ? selectedMerchantId : undefined,
+      }),
+    });
+
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body.token) {
+      throw new Error(
+        body.error || 'Authentication required. Please sign in with Google to continue.'
+      );
+    }
+
+    demoSessionCacheRef.current = { key: personaKey, token: body.token };
+    return body.token;
+  }, [activeRole, selectedFarmerId, selectedMerchantId]);
 
   const apiFetch = useCallback(
     async <T = any>(path: string, options: RequestInit = {}): Promise<T> => {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
-        'x-agrisetu-demo-role': activeRole,
-        'x-agrisetu-farmer-id': String(selectedFarmerId),
-        'x-agrisetu-merchant-id': String(selectedMerchantId),
         ...(options.headers as Record<string, string> | undefined),
       };
 
@@ -114,6 +155,9 @@ export const AgriSetuProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             headers.Authorization = `Bearer ${idTokenRef.current}`;
           }
         }
+      } else {
+        const demoToken = await acquireDemoBearerToken();
+        headers.Authorization = `Bearer ${demoToken}`;
       }
 
       const res = await fetch(path, {
@@ -127,14 +171,32 @@ export const AgriSetuProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
       return body as T;
     },
-    [activeRole, selectedFarmerId, selectedMerchantId, firebaseUser]
+    [firebaseUser, acquireDemoBearerToken]
   );
 
   const refreshData = useCallback(async () => {
+    if (!authReady) return;
     try {
       setError(null);
       const bootstrap = await apiFetch<BootstrapData>('/api/bootstrap');
       setData(bootstrap);
+
+      if (bootstrap.currentActor) {
+        setActiveRole(bootstrap.currentActor.role);
+        if (!bootstrap.currentActor.isDemo) {
+          if (bootstrap.currentActor.role === 'merchant' && activeTab !== 'merchant_market') {
+            setActiveTab('merchant_market');
+          } else if (bootstrap.currentActor.role === 'coordinator' && activeTab !== 'coordinator') {
+            setActiveTab('coordinator');
+          } else if (
+            bootstrap.currentActor.role === 'farmer' &&
+            (activeTab === 'merchant_market' || activeTab === 'coordinator')
+          ) {
+            setActiveTab('assistant');
+          }
+        }
+      }
+
       if (bootstrap.farmers.length > 0) {
         setSelectedFarmerId((prev) =>
           bootstrap.farmers.some((f) => f.id === prev) ? prev : bootstrap.farmers[0].id
@@ -151,12 +213,13 @@ export const AgriSetuProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } finally {
       setLoading(false);
     }
-  }, [apiFetch]);
+  }, [authReady, apiFetch, activeTab]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
       if (user) {
+        demoSessionCacheRef.current = null;
         try {
           const token = await user.getIdToken();
           idTokenRef.current = token;
@@ -173,13 +236,16 @@ export const AgriSetuProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       } else {
         idTokenRef.current = null;
       }
+      setAuthReady(true);
     });
     return () => unsub();
   }, []);
 
   useEffect(() => {
-    refreshData();
-  }, [refreshData]);
+    if (authReady) {
+      refreshData();
+    }
+  }, [authReady, refreshData]);
 
   const updateBootstrapState = useCallback((nextState: Partial<BootstrapData>) => {
     setData((prev) => (prev ? { ...prev, ...nextState } : (nextState as BootstrapData)));
@@ -190,18 +256,23 @@ export const AgriSetuProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const cred = await signInWithPopup(auth, googleAuthProvider);
       const token = await cred.user.getIdToken();
       idTokenRef.current = token;
+      demoSessionCacheRef.current = null;
       pushToast('success', `Signed in as ${cred.user.displayName || cred.user.email}`);
-      await refreshData();
     } catch (err: any) {
       pushToast('error', err.message || 'Google Sign-In cancelled or unavailable.');
     }
-  }, [pushToast, refreshData]);
+  }, [pushToast]);
 
   const logoutGoogle = useCallback(async () => {
     try {
       await signOut(auth);
       idTokenRef.current = null;
-      pushToast('info', 'Signed out. Continuing in Demo Pilot Mode.');
+      demoSessionCacheRef.current = null;
+      setSelectedFarmerId(1);
+      setSelectedMerchantId(1);
+      setActiveRole('farmer');
+      setActiveTab('assistant');
+      pushToast('info', 'Signed out of Google account.');
     } catch (err: any) {
       pushToast('error', err.message || 'Sign-out failed.');
     }
@@ -214,6 +285,7 @@ export const AgriSetuProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         loading,
         error,
         firebaseUser,
+        authReady,
         uiLang,
         setUiLang,
         activeTab,
