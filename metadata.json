@@ -1,0 +1,6 @@
+{
+  "name": "AGRISETU",
+  "description": "Samriddh Annadata, Samriddh Bharat — A voice-first agricultural guidance, crop planning, farm supply, and post-harvest market coordination platform.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
