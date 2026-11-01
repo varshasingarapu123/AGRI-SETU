@@ -9,8 +9,6 @@ import {
   Bell,
   Menu,
   X,
-  LogIn,
-  LogOut,
   CheckCheck,
 } from 'lucide-react';
 import { AgriSetuProvider, useAgriSetu } from './context/AgriSetuContext.tsx';
@@ -57,7 +55,6 @@ const AgriSetuWorkspace: React.FC = () => {
     data,
     loading,
     error,
-    firebaseUser,
     uiLang,
     setUiLang,
     activeTab,
@@ -68,8 +65,6 @@ const AgriSetuWorkspace: React.FC = () => {
     apiFetch,
     refreshData,
     updateBootstrapState,
-    signInWithGoogle,
-    logoutGoogle,
     toasts,
     dismissToast,
   } = useAgriSetu();
@@ -92,20 +87,7 @@ const AgriSetuWorkspace: React.FC = () => {
     { id: 'coordinator', label: t.navCoordinator, icon: ShieldAlert },
   ];
 
-  const isLiveAuthenticatedActor = Boolean(data?.currentActor && !data.currentActor.isDemo);
-  const navItems = isLiveAuthenticatedActor
-    ? allNavItems.filter((item) => {
-        const verifiedRole = data?.currentActor?.role;
-        if (verifiedRole === 'coordinator') return item.id === 'coordinator';
-        if (verifiedRole === 'merchant') return item.id === 'merchant_market';
-        return (
-          item.id === 'assistant' ||
-          item.id === 'farmer_market' ||
-          item.id === 'agriroute' ||
-          item.id === 'my_farm'
-        );
-      })
-    : allNavItems;
+  const navItems = allNavItems;
 
   // Filter notifications relevant to current role/actor
   const roleNotifications = (data?.notifications || []).filter((n) => {
@@ -326,7 +308,7 @@ const AgriSetuWorkspace: React.FC = () => {
             {t.demoNotice}
           </div>
 
-          {/* Right Actions: Notifications & Auth */}
+          {/* Right Actions: Notifications */}
           <div className="flex items-center gap-3 shrink-0 relative">
             <button
               type="button"
@@ -342,28 +324,6 @@ const AgriSetuWorkspace: React.FC = () => {
                 </span>
               )}
             </button>
-
-            {firebaseUser ? (
-              <button
-                type="button"
-                onClick={logoutGoogle}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium border border-[#D4DCD2] text-[#14241B] rounded-lg hover:bg-[#F3F5F1] whitespace-nowrap shrink-0"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span className="max-w-[110px] truncate">
-                  {firebaseUser.displayName || t.signOut}
-                </span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={signInWithGoogle}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium bg-[#1B4332] text-white rounded-lg hover:bg-[#143326] transition-colors whitespace-nowrap shrink-0"
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                <span>{t.signInGoogle}</span>
-              </button>
-            )}
 
             {/* Notifications Dropdown Panel */}
             {notifOpen && (

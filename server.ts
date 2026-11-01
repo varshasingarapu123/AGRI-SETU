@@ -6,7 +6,6 @@ import { createServer as createViteServer } from 'vite';
 import {
   isDemoModeEnabled,
   issueDemoSessionToken,
-  requireAuth,
   requireAuthenticatedActor,
   requireRole,
   type AuthRequest,
@@ -18,7 +17,6 @@ import {
   NotFoundError,
   assertFarmerOwnership,
   resolveConsentFlags,
-  getOrCreateAuthUser,
   resolveDemoPersonaForSession,
   getScopedBootstrapState,
   updateFarmerProfileAndFarm,
@@ -119,18 +117,18 @@ export function createApiApp() {
 
   app.use(express.json({ limit: '15mb' }));
 
-  // Controlled Demo Persona Session Endpoint (strictly disabled in production)
-  app.post('/api/auth/demo-session', async (req, res) => {
+  // Open Public Workspace Session Endpoint (no sign-in required; works in dev & production)
+  const handleWorkspaceSession = async (req: express.Request, res: Response) => {
     if (!isDemoModeEnabled()) {
       return res.status(403).json({
-        error: 'Demo authentication is disabled in this environment. Sign in with Firebase.',
+        error: 'Open workspace sessions are disabled in this environment.',
       });
     }
     try {
       await ensureDemoSeedData();
-      const role = req.body?.role;
+      const role = req.body?.role || 'farmer';
       if (role !== 'farmer' && role !== 'merchant' && role !== 'coordinator') {
-        return res.status(400).json({ error: 'Valid demo role is required.' });
+        return res.status(400).json({ error: 'Valid workspace role is required.' });
       }
       const actor = await resolveDemoPersonaForSession({
         role,
@@ -149,32 +147,17 @@ export function createApiApp() {
         },
       });
     } catch (error) {
-      return handleRouteError(res, error, 'Failed to establish demo session.');
+      return handleRouteError(res, error, 'Failed to establish workspace session.');
     }
-  });
+  };
 
-  // Sync verified Firebase user on Google login
-  app.post('/api/auth/sync', requireAuth, async (req: AuthRequest, res) => {
-    try {
-      if (isDemoModeEnabled()) {
-        await ensureDemoSeedData();
-      }
-      const uid = req.user!.uid;
-      const email = req.user!.email || `${uid}@firebase.user`;
-      const name = req.user!.name || email.split('@')[0];
-      const dbUser = await getOrCreateAuthUser(uid, email, name);
-      return res.json({ user: dbUser, actor: req.actor });
-    } catch (error) {
-      return handleRouteError(res, error, 'Failed to sync user account.');
-    }
-  });
+  app.post('/api/session', handleWorkspaceSession);
+  app.post('/api/auth/demo-session', handleWorkspaceSession);
 
-  // Role-scoped & ownership-scoped platform bootstrap
+  // Role-scoped & ownership-scoped platform bootstrap (open access — no sign-in required)
   app.get('/api/bootstrap', requireAuthenticatedActor, async (req: AuthRequest, res) => {
     try {
-      if (isDemoModeEnabled()) {
-        await ensureDemoSeedData();
-      }
+      await ensureDemoSeedData();
       const actor = req.actor!;
       const state = await getScopedBootstrapState(actor, isDemoModeEnabled());
       return res.json({

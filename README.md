@@ -38,10 +38,9 @@ AGRISETU is an integrated, bilingual (Telugu & English) agricultural support and
 
 - **Frontend SPA (`src/`)**: React 19 + TypeScript + Tailwind CSS v4. Communicates exclusively with `/api/*` endpoints using `Authorization: Bearer <token>` headers (`AgriSetuContext`).
 - **Full-Stack Server (`server.ts`)**: Express 4 API server mounting Vite middleware in development (`npm run dev`) and serving static compiled assets from `dist/` in production (`npm start`). Blocks direct HTTP access to dotfiles (`.env*`), server modules, and configuration files.
-- **Authentication & RBAC (`src/middleware/auth.ts`, `src/db/repository.ts`)**:
-  - Verifies Firebase ID tokens via `firebase-admin` and resolves user identity, role (`farmer`, `merchant`, `coordinator`), and record ownership strictly from PostgreSQL (`users`, `farmer_profiles`, `merchant_profiles`).
-  - Client-supplied role/ID headers are never trusted.
-  - `/api/bootstrap` is strictly scoped by role, ownership, and demo/live isolation.
+- **Open Access & Workspace Isolation (`src/middleware/auth.ts`, `src/db/repository.ts`)**:
+  - Open public access with **no login or sign-in barrier**: anyone can immediately access and utilize Farmer, Merchant, and Coordinator workspaces via server-signed workspace session tokens (`POST /api/session`) or direct open access.
+  - Arbitrary client-supplied role/ID headers (`x-agrisetu-demo-role`, etc.) are never trusted, and `/api/bootstrap` plus mutation routes remain scoped to the active workspace role and selected profile.
 - **Database Layer (`src/db/`)**: PostgreSQL (Cloud SQL compatible) managed via Drizzle ORM (`src/db/schema.ts`, `src/db/repository.ts`, `src/db/seed.ts`), enforcing transactional idempotent order creation (`orders_source_unique_idx`).
 - **Domain & AI Services (`src/services/`)**:
   - `knowledgeRetrieval.ts`: Tokenization, bilingual Telugu/English synonym expansion, relevance threshold filtering, and high-risk safety detection.
@@ -77,11 +76,8 @@ Copy `.env.example` to `.env` and configure the variables below:
 | `AI_TEXT_MODEL` | Optional | Gemini text model override (defaults to `gemini-3.8-flash`) |
 | `AI_STT_MODEL` | Optional | Gemini speech-to-text model override (defaults to `gemini-3.8-flash`) |
 | `AI_TTS_MODEL` | Optional | Gemini TTS model override (defaults to `gemini-2.5-flash-preview-tts`) |
-| `FIREBASE_PROJECT_ID` | Optional | Firebase project ID (auto-detected from `firebase-applet-config.json` if present) |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | Optional | JSON service account string if Application Default Credentials are not used |
-| `COORDINATOR_EMAILS` | Optional | Comma-separated verified emails granted `coordinator` role on sign-in |
-| `ENABLE_DEMO_MODE` | Optional | Enables isolated fictional demo personas in non-production (`true` by default in dev; forced `false` when `NODE_ENV=production`) |
-| `DEMO_SESSION_SECRET` | Optional | HMAC secret (>=16 chars) for signing non-production demo session tokens |
+| `ENABLE_DEMO_MODE` | Optional | Enables open public workspace access (`true` by default in both dev and production) |
+| `DEMO_SESSION_SECRET` | Optional | HMAC secret (>=16 chars) for signing workspace session tokens |
 | `APP_URL` | Optional | Public URL of the hosted application |
 
 ---
@@ -132,16 +128,11 @@ Copy `.env.example` to `.env` and configure the variables below:
 
 ---
 
-## 7. Demo Mode vs Live Authenticated Mode
+## 7. Open Public Access & Workspace Scoping
 
-- **Controlled Demo Mode (`NODE_ENV !== 'production'` and `ENABLE_DEMO_MODE=true`)**:
-  - Allows exploring fictional farmer, merchant, and coordinator workflows via server-signed HMAC demo session tokens (`POST /api/auth/demo-session`).
-  - Demo sessions can only access `is_demo = true` records and are strictly isolated from real users.
-  - Even in Demo Mode, every endpoint enforces server-side RBAC and per-persona record ownership (e.g., Demo Farmer 1 cannot read or modify Demo Farmer 2's profile or conversations).
-- **Live Authenticated Mode (Firebase Google Sign-In / `NODE_ENV=production`)**:
-  - Demo session endpoints and demo tokens are completely disabled in production (`403` / `401`).
-  - Verified Firebase users receive an isolated `is_demo = false` profile with all privacy consents defaulting to `false`.
-  - Coordinator privileges are granted only to server-verified accounts listed in `COORDINATOR_EMAILS` (or `users.role = 'coordinator'` in PostgreSQL).
+- **No Sign-In Required (`ENABLE_DEMO_MODE=true` by default in dev and production)**:
+  - Anyone opening AGRISETU can immediately utilize all modules (`AI Farmer Assistant`, `Merchant Market`, `Farmer Market`, `AGRIROUTE`, `My Farm`, and `Coordinator Dashboard`) without creating an account or signing in.
+  - Switching workspaces or sample farmer/merchant profiles acquires a server-signed HMAC workspace token (`POST /api/session`), keeping farmer, merchant, and coordinator views cleanly scoped and enforcing per-profile ownership checks.
 
 ---
 

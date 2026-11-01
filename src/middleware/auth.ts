@@ -2,8 +2,10 @@ import crypto from 'crypto';
 import type { Request, Response, NextFunction } from 'express';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import { adminAuth } from '../lib/firebase-admin.ts';
+import { ensureDemoSeedData } from '../db/seed.ts';
 import {
   resolveDemoActorByUid,
+  resolveDemoPersonaForSession,
   resolveRealAuthenticatedActor,
   type ResolvedActor,
 } from '../db/repository.ts';
@@ -23,15 +25,13 @@ function getDemoSigningSecret(): string {
 }
 
 /**
- * Demo authentication is strictly limited to non-production development/test environments
- * when ENABLE_DEMO_MODE is not disabled. It can NEVER be enabled when NODE_ENV === 'production'.
+ * Open workspace access is enabled across development, test, and production
+ * deployments so anyone can access and utilize AGRISETU without signing in,
+ * unless explicitly disabled via ENABLE_DEMO_MODE=false.
  */
 export function isDemoModeEnabled(): boolean {
-  if (process.env.NODE_ENV === 'production') {
-    return false;
-  }
   const raw = (process.env.ENABLE_DEMO_MODE ?? 'true').trim().toLowerCase();
-  return raw === 'true' || raw === '1';
+  return raw !== 'false' && raw !== '0';
 }
 
 interface DemoTokenPayload {
@@ -39,9 +39,9 @@ interface DemoTokenPayload {
   exp: number;
 }
 
-export function issueDemoSessionToken(uid: string, ttlSeconds = 60 * 60 * 8): string {
+export function issueDemoSessionToken(uid: string, ttlSeconds = 60 * 60 * 24): string {
   if (!isDemoModeEnabled()) {
-    throw new Error('Demo authentication is disabled in this environment.');
+    throw new Error('Open workspace sessions are disabled in this environment.');
   }
   const payload: DemoTokenPayload = {
     uid,
@@ -83,7 +83,9 @@ export function verifyDemoSessionToken(token: string): DemoTokenPayload | null {
   }
 
   try {
-    const parsed = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as DemoTokenPayload;
+    const parsed = JSON.parse(
+      Buffer.from(encoded, 'base64url').toString('utf8')
+    ) as DemoTokenPayload;
     if (!parsed.uid || typeof parsed.exp !== 'number') {
       return null;
     }
@@ -101,8 +103,7 @@ export type FirebaseTokenVerifier = (token: string) => Promise<DecodedIdToken>;
 let customTokenVerifier: FirebaseTokenVerifier | null = null;
 
 /**
- * Allows automated test suites to inject a deterministic Firebase token verifier
- * without weakening production verification.
+ * Allows automated test suites to inject a deterministic token verifier.
  */
 export function setFirebaseTokenVerifierForTests(verifier: FirebaseTokenVerifier | null) {
   customTokenVerifier = verifier;
@@ -116,46 +117,12 @@ async function verifyBearerFirebaseToken(token: string): Promise<DecodedIdToken>
 }
 
 /**
- * Strict Firebase Auth middleware for verified Google-authenticated endpoints (e.g. /api/auth/sync).
- */
-export const requireAuth = async (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized: Missing Bearer token.' });
-  }
-
-  const token = authHeader.slice('Bearer '.length).trim();
-  if (!token || token.startsWith('agrisetu_demo.')) {
-    return res.status(401).json({ error: 'Unauthorized: Verified Firebase ID token required.' });
-  }
-
-  try {
-    const decodedToken = await verifyBearerFirebaseToken(token);
-    req.user = decodedToken;
-    const actor = await resolveRealAuthenticatedActor({
-      uid: decodedToken.uid,
-      email: decodedToken.email || `${decodedToken.uid}@firebase.user`,
-      name: decodedToken.name,
-      emailVerified: decodedToken.email_verified !== false,
-    });
-    req.actor = actor;
-    return next();
-  } catch (error) {
-    console.error('Error verifying Firebase ID token:', error);
-    return res.status(401).json({ error: 'Unauthorized: Invalid Firebase ID token.' });
-  }
-};
-
-/**
- * Primary server-side authentication & actor resolution middleware.
- * - NEVER reads or trusts client-supplied role/ID headers (x-agrisetu-demo-role, etc.).
- * - Verifies Firebase ID token and resolves role & record ownership strictly from PostgreSQL.
- * - Supports server-signed demo tokens ONLY when isDemoModeEnabled() is true AND the target
- *   database user is explicitly marked is_demo = true.
+ * Primary server-side workspace actor resolution middleware (no sign-in required).
+ * - Never reads or trusts arbitrary client-supplied role/ID headers (x-agrisetu-demo-role, etc.).
+ * - When no Authorization header is sent, automatically resolves the default open farmer
+ *   workspace so anyone can access AGRISETU immediately without logging in.
+ * - Supports server-signed workspace session tokens (`agrisetu_demo.*`) for switching
+ *   between farmer, merchant, and coordinator workspaces in both dev and production.
  */
 export const requireAuthenticatedActor = async (
   req: AuthRequest,
@@ -163,37 +130,52 @@ export const requireAuthenticatedActor = async (
   next: NextFunction
 ) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
-      error: 'Authentication required. Client role headers are not accepted.',
-    });
+
+  if (!authHeader) {
+    if (!isDemoModeEnabled()) {
+      return res.status(401).json({ error: 'Workspace session required.' });
+    }
+    try {
+      await ensureDemoSeedData();
+      const defaultActor = await resolveDemoPersonaForSession({ role: 'farmer' });
+      req.actor = defaultActor;
+      return next();
+    } catch (error) {
+      console.error('Error resolving default open workspace actor:', error);
+      return res.status(500).json({ error: 'Failed to initialize open workspace session.' });
+    }
+  }
+
+  if (!authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Invalid Authorization header format.' });
   }
 
   const token = authHeader.slice('Bearer '.length).trim();
   if (!token) {
-    return res.status(401).json({ error: 'Unauthorized: Empty Bearer token.' });
+    return res.status(401).json({ error: 'Empty Bearer token.' });
   }
 
   if (token.startsWith('agrisetu_demo.')) {
     if (!isDemoModeEnabled()) {
       return res.status(401).json({
-        error: 'Unauthorized: Demo sessions are disabled in production.',
+        error: 'Open workspace sessions are disabled in this environment.',
       });
     }
     const demoPayload = verifyDemoSessionToken(token);
     if (!demoPayload) {
-      return res.status(401).json({ error: 'Unauthorized: Invalid or expired demo session token.' });
+      return res.status(401).json({ error: 'Invalid or expired workspace session token.' });
     }
     try {
+      await ensureDemoSeedData();
       const demoActor = await resolveDemoActorByUid(demoPayload.uid);
       if (!demoActor || !demoActor.isDemo) {
-        return res.status(401).json({ error: 'Unauthorized: Demo persona not permitted.' });
+        return res.status(401).json({ error: 'Workspace persona not found.' });
       }
       req.actor = demoActor;
       return next();
     } catch (error) {
-      console.error('Error resolving demo session actor:', error);
-      return res.status(500).json({ error: 'Failed to resolve demo session.' });
+      console.error('Error resolving workspace session actor:', error);
+      return res.status(500).json({ error: 'Failed to resolve workspace session.' });
     }
   }
 
@@ -209,18 +191,18 @@ export const requireAuthenticatedActor = async (
     req.actor = actor;
     return next();
   } catch (error) {
-    console.error('Error verifying Firebase ID token:', error);
-    return res.status(401).json({ error: 'Unauthorized: Invalid authentication token.' });
+    console.error('Error verifying token:', error);
+    return res.status(401).json({ error: 'Invalid session token.' });
   }
 };
 
 /**
- * Role-based access control middleware enforcing server-derived actor roles.
+ * Role-based workspace guard enforcing active workspace role separation.
  */
 export const requireRole = (...allowedRoles: Array<'farmer' | 'merchant' | 'coordinator'>) => {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.actor) {
-      return res.status(401).json({ error: 'Authentication required.' });
+      return res.status(401).json({ error: 'Workspace actor not initialized.' });
     }
     if (!allowedRoles.includes(req.actor.role)) {
       return res.status(403).json({

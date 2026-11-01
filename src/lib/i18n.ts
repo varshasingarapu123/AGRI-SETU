@@ -15,8 +15,6 @@ export const UI_LABELS: Record<
     selectFarmerProfile: string;
     editProfile: string;
     demoNotice: string;
-    signInGoogle: string;
-    signOut: string;
   }
 > = {
   en: {
@@ -29,11 +27,9 @@ export const UI_LABELS: Record<
     navCoordinator: 'Coordinator Dashboard',
     speakOnCall: 'Speak on Call',
     endCall: 'End Conversation',
-    selectFarmerProfile: 'Active Demo Farmer Profile',
+    selectFarmerProfile: 'Active Farmer Profile',
     editProfile: 'Edit Profile & Consent',
-    demoNotice: 'Pilot Prototype — Fictional records are clearly marked as Demo Data',
-    signInGoogle: 'Sign In',
-    signOut: 'Sign Out',
+    demoNotice: 'Open Access Platform — Sample records are clearly marked as Demo Data',
   },
   te: {
     tagline: 'సమృద్ధ అన్నదాత, సమృద్ధ భారత్',
@@ -45,10 +41,8 @@ export const UI_LABELS: Record<
     navCoordinator: 'కోఆర్డినేటర్ డాష్‌బోర్డ్',
     speakOnCall: 'కాల్‌లో మాట్లాడండి (Speak on Call)',
     endCall: 'సంభాషణ ముగించు',
-    selectFarmerProfile: 'ఎంచుకున్న డెమో రైతు ప్రొఫైల్',
+    selectFarmerProfile: 'ఎంచుకున్న రైతు ప్రొఫైల్',
     editProfile: 'ప్రొఫైల్ & అనుమతి మార్చు',
-    demoNotice: 'పైలట్ నమూనా — నమూనా సమాచారం స్పష్టంగా డెమో డేటాగా చూపబడింది',
-    signInGoogle: 'లాగిన్',
-    signOut: 'లాగ్ అవుట్',
+    demoNotice: 'ఓపెన్ యాక్సెస్ వేదిక — నమూనా సమాచారం స్పష్టంగా డెమో డేటాగా చూపబడింది',
   },
 };

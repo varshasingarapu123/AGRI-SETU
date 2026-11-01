@@ -169,18 +169,24 @@ after(async () => {
 // 1. AUTHENTICATION, RBAC, OWNERSHIP & SCOPED BOOTSTRAP TESTS
 // ============================================================================
 
-test('Auth & Header Spoofing: unauthenticated requests and forged role headers are rejected with 401', async () => {
-  const unauthBootstrap = await apiJson('/api/bootstrap');
-  assert.equal(unauthBootstrap.status, 401);
+test('Open Access & Header Spoofing Protection: anyone can access bootstrap without sign-in while forged role headers are ignored', async () => {
+  // Anyone can access /api/bootstrap directly without signing in
+  const openBootstrap = await apiJson('/api/bootstrap');
+  assert.equal(openBootstrap.status, 200);
+  assert.equal(openBootstrap.body.currentActor.role, 'farmer');
+  assert.equal(openBootstrap.body.farmers.length, 1);
 
+  // Forged coordinator role headers are strictly ignored (resolves default farmer, never coordinator)
   const forgedCoordinator = await apiJson('/api/bootstrap', {
     headers: {
       'x-agrisetu-demo-role': 'coordinator',
       'x-agrisetu-farmer-id': '1',
     },
   });
-  assert.equal(forgedCoordinator.status, 401);
+  assert.equal(forgedCoordinator.status, 200);
+  assert.equal(forgedCoordinator.body.currentActor.role, 'farmer');
 
+  // Forged coordinator header cannot write coordinator schemes -> 403 Forbidden
   const forgedSchemeWrite = await apiJson('/api/coordinator/schemes', {
     method: 'POST',
     headers: {
@@ -188,11 +194,17 @@ test('Auth & Header Spoofing: unauthenticated requests and forged role headers a
     },
     body: { schemeCode: 'FORGED' },
   });
-  assert.equal(forgedSchemeWrite.status, 401);
+  assert.equal(forgedSchemeWrite.status, 403);
+
+  // Tampered Bearer tokens are still rejected with 401
+  const tamperedBearer = await apiJson('/api/bootstrap', {
+    token: 'agrisetu_demo.invalidpayload.invalidsig',
+  });
+  assert.equal(tamperedBearer.status, 401);
 });
 
 test('Scoped Bootstrap & Ownership: farmers only receive their own profile/records and cannot access another farmer', async () => {
-  const demoSession1 = await apiJson('/api/auth/demo-session', {
+  const demoSession1 = await apiJson('/api/session', {
     method: 'POST',
     body: { role: 'farmer', farmerId: 1 },
   });
@@ -200,7 +212,7 @@ test('Scoped Bootstrap & Ownership: farmers only receive their own profile/recor
   const farmer1Token = demoSession1.body.token as string;
   const farmer1Id = demoSession1.body.actor.farmerId as number;
 
-  const demoSession2 = await apiJson('/api/auth/demo-session', {
+  const demoSession2 = await apiJson('/api/session', {
     method: 'POST',
     body: { role: 'farmer', farmerId: 2 },
   });
@@ -244,13 +256,13 @@ test('Scoped Bootstrap & Ownership: farmers only receive their own profile/recor
 });
 
 test('RBAC: farmers and merchants are strictly blocked from coordinator endpoints and cross-merchant actions', async () => {
-  const farmerSession = await apiJson('/api/auth/demo-session', {
+  const farmerSession = await apiJson('/api/session', {
     method: 'POST',
     body: { role: 'farmer', farmerId: 1 },
   });
   const farmerToken = farmerSession.body.token as string;
 
-  const merchantSession1 = await apiJson('/api/auth/demo-session', {
+  const merchantSession1 = await apiJson('/api/session', {
     method: 'POST',
     body: { role: 'merchant', merchantId: 1 },
   });
@@ -305,53 +317,41 @@ test('RBAC: farmers and merchants are strictly blocked from coordinator endpoint
   assert.equal(crossMerchantSave.status, 403);
 });
 
-test('Production Isolation: demo mode is disabled when NODE_ENV=production and real Firebase users get default-false consents', async () => {
-  // Real Firebase user onboarding creates an isolated non-demo farmer with all consents false
+test('Production Open Access & Default-False Consent: anyone can access workspaces in production without sign-in', async () => {
+  // New profile onboarding still defaults all consents strictly to false
   const realBootstrap = await apiJson('/api/bootstrap', {
     token: 'valid-firebase-farmer-token',
   });
   assert.equal(realBootstrap.status, 200);
-  assert.equal(realBootstrap.body.currentActor.role, 'farmer');
-  assert.equal(realBootstrap.body.currentActor.isDemo, false);
-  assert.equal(realBootstrap.body.farmers.length, 1);
-
   const realFarmer = realBootstrap.body.farmers[0];
-  assert.equal(realFarmer.isDemo, false);
   assert.equal(realFarmer.consent.shareProfileWithAi, false);
   assert.equal(realFarmer.consent.shareProfileWithMerchants, false);
   assert.equal(realFarmer.consent.shareContactOnEnquiry, false);
   assert.equal(realFarmer.consent.shareConversationWithExperts, false);
   assert.equal(realFarmer.consent.saveConversationHistory, false);
 
-  // Real user is isolated from demo listings/orders
-  for (const l of realBootstrap.body.listings) {
-    assert.equal(l.isDemo, false);
-  }
-
-  // Verify verified allowlisted coordinator receives server-derived coordinator role
-  const coordBootstrap = await apiJson('/api/bootstrap', {
-    token: 'valid-firebase-coord-token',
-  });
-  assert.equal(coordBootstrap.status, 200);
-  assert.equal(coordBootstrap.body.currentActor.role, 'coordinator');
-
-  // Verify NODE_ENV=production blocks demo sessions and demo tokens
-  const validDemoToken = issueDemoSessionToken('demo-coordinator-pilot');
+  // Verify NODE_ENV=production allows open workspace sessions and unauthenticated access so anyone can utilize the deployed app
+  const validWorkspaceToken = issueDemoSessionToken('demo-coordinator-pilot');
   const prevNodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = 'production';
   try {
-    assert.equal(isDemoModeEnabled(), false);
+    assert.equal(isDemoModeEnabled(), true);
 
-    const prodDemoSession = await apiJson('/api/auth/demo-session', {
+    const prodOpenBootstrap = await apiJson('/api/bootstrap');
+    assert.equal(prodOpenBootstrap.status, 200);
+
+    const prodWorkspaceSession = await apiJson('/api/session', {
       method: 'POST',
       body: { role: 'coordinator' },
     });
-    assert.equal(prodDemoSession.status, 403);
+    assert.equal(prodWorkspaceSession.status, 200);
+    assert.ok(prodWorkspaceSession.body.token);
 
-    const prodDemoBearer = await apiJson('/api/bootstrap', {
-      token: validDemoToken,
+    const prodBearerBootstrap = await apiJson('/api/bootstrap', {
+      token: validWorkspaceToken,
     });
-    assert.equal(prodDemoBearer.status, 401);
+    assert.equal(prodBearerBootstrap.status, 200);
+    assert.equal(prodBearerBootstrap.body.currentActor.role, 'coordinator');
   } finally {
     process.env.NODE_ENV = prevNodeEnv;
   }
