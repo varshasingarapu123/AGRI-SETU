@@ -336,10 +336,29 @@ export interface NotificationRecord {
 
 export interface AiRuntimeStatus {
   aiConfigured: boolean;
-  textModel: string;
-  sttModel: string;
-  ttsModel: string;
-  modeLabel: string;
+  isDemoMode: boolean;
+}
+
+export interface CropSuitabilityOption {
+  cropName: string;
+  cropNameTe: string;
+  recommendedVarieties: string;
+  suitabilityBand: 'High Agronomic Suitability' | 'Conditional Suitability' | 'Evaluate With Caution';
+  ruleScore: number;
+  whySuitable: string;
+  soilRequirements: string;
+  irrigationConsiderations: string;
+  importantConstraints: string;
+  rotationBenefit: string;
+  marketDemandSignal: string;
+  isDemoRuleModel: boolean;
+}
+
+export interface CropSuitabilityResult {
+  disclaimer: string;
+  missingInformation: string[];
+  evaluatedInputsSummary: string;
+  options: CropSuitabilityOption[];
 }
 
 export interface BootstrapData {
@@ -359,3 +378,4 @@ export interface BootstrapData {
   notifications: NotificationRecord[];
   aiRuntime: AiRuntimeStatus;
 }
+

@@ -23,12 +23,7 @@ export const getAiRuntimeStatus = () => {
   );
   return {
     aiConfigured: configured,
-    textModel: process.env.AI_TEXT_MODEL || 'gemini-3.8-flash',
-    sttModel: process.env.AI_STT_MODEL || 'gemini-3.5-transcribe',
-    ttsModel: process.env.AI_TTS_MODEL || 'gemini-3.8-flash-lite-tts',
-    modeLabel: configured
-      ? 'Live Server-Side Gemini AI + PostgreSQL RAG'
-      : 'Demo Mode (Rule-Based PostgreSQL RAG Fallback — Configure GEMINI_API_KEY in Secrets for Live AI/Voice)',
+    isDemoMode: !configured,
   };
 };
 
@@ -179,7 +174,7 @@ export async function generateAgriculturalGuidance(params: {
         ? 'Farmer requested chemical dosage / high-risk pest intervention requiring certified agronomist review.'
         : '',
       confidenceNote:
-        'Demo Mode (Rule-Based RAG Fallback): Generated from AGRISETU PostgreSQL knowledge base because GEMINI_API_KEY is not active.',
+        'Demo Mode: Grounded response generated from verified AGRISETU agricultural advisories.',
       citations,
       demoFallback: true,
     };
@@ -340,7 +335,7 @@ export async function transcribeRegionalTeluguAudio(params: {
 
   if (!ai) {
     throw new Error(
-      'Server Speech-to-Text requires GEMINI_API_KEY in Settings > Secrets. Use browser voice recognition or text input in Demo Mode.'
+      'Demo Mode active: Using browser voice recognition or text input.'
     );
   }
 

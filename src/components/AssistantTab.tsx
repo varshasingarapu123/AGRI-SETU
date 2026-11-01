@@ -18,8 +18,11 @@ import {
 } from 'lucide-react';
 import { useAgriSetu } from '../context/AgriSetuContext.tsx';
 import { FarmerProfileModal } from './FarmerProfileModal.tsx';
-import type { BootstrapData, SchemeRecord } from '../types/agrisetu.ts';
-import type { CropSuitabilityResult } from '../services/cropSuitabilityEngine.ts';
+import type {
+  BootstrapData,
+  CropSuitabilityResult,
+  SchemeRecord,
+} from '../types/agrisetu.ts';
 
 type AssistantSubView = 'call' | 'suitability' | 'schemes' | 'knowledge';
 
@@ -364,11 +367,11 @@ export const AssistantTab: React.FC = () => {
           await submitQuestionToAssistant(browserTranscript, true);
         } else {
           setCallStatusText(
-            'Demo Mode: Server STT requires GEMINI_API_KEY — select a sample prompt or type below'
+            'Demo Mode: Select a sample question or use text input below'
           );
           pushToast(
             'info',
-            'Demo Mode active: Configure GEMINI_API_KEY in Settings > Secrets for server Telugu Speech-to-Text, or type below.'
+            'Demo Mode active: Please use browser speech recognition, a sample prompt, or text input below.'
           );
         }
       };
@@ -707,9 +710,9 @@ export const AssistantTab: React.FC = () => {
           </button>
         </div>
 
-        <p className="text-xs text-[#4B5E52]">
-          {data?.aiRuntime.modeLabel}
-        </p>
+        {data?.aiRuntime.isDemoMode && (
+          <p className="text-xs text-[#4B5E52]">Demo Mode Active</p>
+        )}
       </div>
 
       {/* SUBVIEW 1: SPEAK ON CALL & CONVERSATION */}

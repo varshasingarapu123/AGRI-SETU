@@ -393,7 +393,7 @@ export const CoordinatorDashboardTab: React.FC = () => {
         <div className="bg-white border border-[#E3E7E1] rounded-xl p-6 space-y-5">
           <div>
             <p className="text-xs text-[#4B5E52]">
-              Live Database Telemetry · Distinguishing Indicative Interest from Confirmed Outcomes
+              Pilot Coordination Summary · Distinguishing Indicative Interest from Confirmed Outcomes
             </p>
             <h3 className="text-base font-semibold text-[#14241B] mt-0.5">
               Measurable Pilot Outcomes Matrix

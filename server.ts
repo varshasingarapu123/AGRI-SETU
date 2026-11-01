@@ -52,6 +52,39 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.disable('x-powered-by');
+
+  // Block any HTTP access to .env files, hidden dotfiles, config files, and server-only modules
+  app.use((req, res, next) => {
+    const reqPath = decodeURIComponent(req.path || '').toLowerCase();
+    const isViteInternal =
+      reqPath.startsWith('/@vite') ||
+      reqPath.startsWith('/@react-refresh') ||
+      reqPath.startsWith('/@id/') ||
+      reqPath.startsWith('/node_modules/.vite/');
+
+    if (!isViteInternal) {
+      const blocked =
+        reqPath.includes('.env') ||
+        /(^|\/)\.(?!well-known)/.test(reqPath) ||
+        reqPath === '/server.ts' ||
+        reqPath === '/package.json' ||
+        reqPath === '/bun.lock' ||
+        reqPath === '/tsconfig.json' ||
+        reqPath === '/vite.config.ts' ||
+        (reqPath === '/firebase-applet-config.json' && !('import' in req.query)) ||
+        reqPath.startsWith('/src/db') ||
+        reqPath.startsWith('/src/services') ||
+        reqPath.startsWith('/src/middleware') ||
+        reqPath === '/src/lib/firebase-admin.ts';
+
+      if (blocked) {
+        return res.status(404).end();
+      }
+    }
+    next();
+  });
+
   app.use(express.json({ limit: '15mb' }));
 
   // Sync verified Firebase user on Google login
@@ -335,7 +368,7 @@ async function startServer() {
       res.status(500).json({
         error:
           error.message ||
-          'Failed to generate agricultural guidance. Check GEMINI_API_KEY in Settings > Secrets.',
+          'Unable to generate agricultural guidance right now. Please try again.',
       });
     }
   });
@@ -716,7 +749,7 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(__dirname, 'dist');
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, { dotfiles: 'deny' }));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
